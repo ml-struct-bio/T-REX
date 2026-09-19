@@ -1,0 +1,79 @@
+{
+  "schema_version": "trex_production_stack.v1",
+  "campaign_contract": {
+    "controller_gpu": 1,
+    "worker_gpus": 3,
+    "primary_budget_unit": "worker-wall GPU-hour",
+    "primary_foldseek_tm_score": 0.60,
+    "collapse_foldseek_tm_score": 0.60,
+    "structure_scope": "binder_chain"
+  },
+  "components": {
+    "proteina_complexa": {
+      "repository": "https://github.com/NVIDIA-Digital-Bio/Proteina-Complexa",
+      "git_commit": "5ae24b055d828918296f2aad63616b1f4cc0e491",
+      "branch_at_capture": "dev",
+      "role": "generation plus the Python environment used for AF2/ProteinMPNN dispatch"
+    },
+    "proteina_complexa_community": {
+      "repository": "https://github.com/NVIDIA-Digital-Bio/Proteina-Complexa",
+      "git_commit": "d323517efbffe3ea280e4e3d0442b0257a37b5a8",
+      "role": "community-model tree used for AF2 parameters, ColabDesign, and ProteinMPNN"
+    },
+    "bindcraft": {
+      "repository": "https://github.com/martinpacesa/BindCraft",
+      "git_commit": "b971db42ba6e091afab63ccb30ae02215150a990",
+      "patch": "external/patches/bindcraft-production.patch",
+      "patch_file_sha256": "dc69de94f8b21a14ebd26e13f41330676161df63b29340fa90d15100f7406268",
+      "production_tracked_diff_sha256": "81b8e5394f5cd68a6c7f8b5355e1d62593cb92cfad6ba612c50019104dc21a28",
+      "role": "hallucination-based binder generation; the patch changes only required executable mode bits"
+    },
+    "boltzgen": {
+      "repository": "https://github.com/HannesStark/boltzgen",
+      "git_commit": "31d9d9b9c72245b4ed6fe8742d6fbf4e1a3552a0",
+      "role": "diffusion-based binder generation"
+    },
+    "af2_parameters": {
+      "manifest": "config/reproducibility/af2_parameters_manifest.json",
+      "content_sha256": "2ce0664041f82ce7fdbbaa523696327e0895465210d066c8bdfd4ed19e4732b0",
+      "n_files": 16,
+      "total_bytes": 5587956571,
+      "role": "external AF2 parameter tree used by canonical structure refiltering"
+    },
+    "proteinmpnn_weights": {
+      "manifest": "config/reproducibility/proteinmpnn_weights_manifest.json",
+      "content_sha256": "3022126a2617a96ded10604eba039b6fcd1ad094512291c2eab9429f463dc160",
+      "n_files": 4,
+      "total_bytes": 26725204,
+      "role": "external ProteinMPNN vanilla model weights used by parent-specific redesign"
+    },
+    "foldseek": {
+      "version": "8dc75c74ad0eddab73cfd905963d13bf74dc012b",
+      "role": "binder-chain structural clustering"
+    },
+    "mmseqs2": {
+      "version": "76da68ad7577378410c075049e18666fcc94f8d1",
+      "role": "secondary sequence-diversity clustering"
+    },
+    "llm": {
+      "served_name": "Qwen/Qwen3.6-27B-FP8",
+      "upstream_revision": "ec4160bf26124fa57e6451d070ee0c459a36d5b7",
+      "content_sha256": "77409ac00f81e48d29b9f079ab448044a5ec1cdd91dfdb50b3035c197f065722",
+      "manifest": "config/trex/qwen3_6_27b_fp8_model_manifest.json"
+    },
+    "controller_environment": {
+      "python": "3.12.13",
+      "lock": "config/trex/controller_requirements.lock.txt",
+      "vllm": "0.19.0",
+      "torch": "2.10.0",
+      "openai": "2.32.0",
+      "pydantic": "2.13.2",
+      "numpy": "2.4.4"
+    }
+  },
+  "notes": [
+    "Target structures are external and are verified by config/targets/assets.sha256.json.",
+    "AF2 multimer parameters and ProteinMPNN weights are external licensed assets and are not redistributed.",
+    "The controller records the concrete revisions, dirty-diff hashes, target hashes, model hash, and runtime versions in each run_provenance.json."
+  ]
+}

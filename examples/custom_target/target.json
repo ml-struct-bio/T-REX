@@ -1,0 +1,10 @@
+{
+  "target_id": "replace_with_stable_target_id",
+  "target_class": "replace_with_target_class",
+  "hotspots": ["A42", "A77"],
+  "forbidden_surfaces": [],
+  "chain_ids": ["A"],
+  "assay_geometry": {},
+  "developability_filters": {},
+  "panel_size_K": 8
+}

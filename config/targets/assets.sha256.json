@@ -1,0 +1,86 @@
+{
+  "schema_version": "trex_target_assets.v1",
+  "source": "Proteina-Complexa assets/target_data",
+  "targets": {
+    "betv1": {
+      "bytes": 198611,
+      "chains": {"A": {"max_residue": 159, "min_residue": 1, "n_residues": 159}},
+      "path": "bindcraft_targets/BetV1.pdb",
+      "sha256": "3fac136a50a658bd883bb6404a297d1cfbda98cb4fbe6a01bbd931822514987d",
+      "target_id": "23_BetV1"
+    },
+    "cbago": {
+      "bytes": 62207,
+      "chains": {"A": {"max_residue": 276, "min_residue": 180, "n_residues": 97}},
+      "path": "bindcraft_targets/CbAgo_cropped_PAZ.pdb",
+      "sha256": "c5f7c3d685a15296e9515ff7024b1916ff33702df68b1c6cd0b7f15a7b243285",
+      "target_id": "26_CbAgo"
+    },
+    "cd45": {
+      "bytes": 115829,
+      "chains": {"A": {"max_residue": 88, "min_residue": 1, "n_residues": 88}},
+      "path": "bindcraft_targets/CD45.pdb",
+      "sha256": "ea9e068e7f44d29d51e05e639bb361015350e26b4efdf45a67f8fc62c624efaa",
+      "target_id": "05_CD45"
+    },
+    "her2aav": {
+      "bytes": 148716,
+      "chains": {"C": {"max_residue": 268, "min_residue": 23, "n_residues": 237}},
+      "path": "bindcraft_targets/HER2_cropped.pdb",
+      "sha256": "b4099344abd3c8bea4e8ddbd9ebd5d6c824580904f06211cdbc6bdbf4a4b0e3c",
+      "target_id": "28_HER2_AAV"
+    },
+    "il17a": {
+      "bytes": 280907,
+      "chains": {
+        "A": {"max_residue": 131, "min_residue": 17, "n_residues": 104},
+        "B": {"max_residue": 127, "min_residue": 19, "n_residues": 109}
+      },
+      "path": "alpha_proteo_targets/4hsa_cropped.pdb",
+      "sha256": "b2c7ba956396d905b339447762a7cd47bbbd1a8a079282f9e5b3b496cc6b209c",
+      "target_id": "37_IL17A"
+    },
+    "il7ra": {
+      "bytes": 124497,
+      "chains": {"B": {"max_residue": 209, "min_residue": 17, "n_residues": 193}},
+      "path": "alpha_proteo_targets/3di3_cropped.pdb",
+      "sha256": "09e5b9874ad45a79013a962dc9a2d2195097f625797cb6dcaabbdfb430078465",
+      "target_id": "31_IL7RA"
+    },
+    "pdl1": {
+      "bytes": 75311,
+      "chains": {"A": {"max_residue": 132, "min_residue": 17, "n_residues": 116}},
+      "path": "alpha_proteo_targets/5o45_repacked.pdb",
+      "sha256": "dcd82d0a0258524ad6b036c39a3743cd8e16fb455178531781f81f5735a6a397",
+      "target_id": "32_PDL1_ALPHA_REPACK"
+    },
+    "sc2rbd": {
+      "bytes": 124982,
+      "chains": {"E": {"max_residue": 526, "min_residue": 333, "n_residues": 194}},
+      "path": "alpha_proteo_targets/6m0j_cropped.pdb",
+      "sha256": "312a33397411a070ca7c8ca440461cb2c14b590d33725407b9c5fe579940e3e1",
+      "target_id": "30_SC2RBD"
+    },
+    "tnfalpha": {
+      "bytes": 277379,
+      "chains": {
+        "A": {"max_residue": 157, "min_residue": 12, "n_residues": 146},
+        "B": {"max_residue": 157, "min_residue": 12, "n_residues": 146},
+        "C": {"max_residue": 157, "min_residue": 12, "n_residues": 146}
+      },
+      "path": "alpha_proteo_targets/1tnf_repacked.pdb",
+      "sha256": "031887e6ef8e94d35bcad371fb3e7c156d99481766438080b3d3917188fcd4b0",
+      "target_id": "38_TNFalpha_REPACK"
+    },
+    "vegfa": {
+      "bytes": 123443,
+      "chains": {
+        "V": {"max_residue": 107, "min_residue": 14, "n_residues": 94},
+        "W": {"max_residue": 107, "min_residue": 14, "n_residues": 94}
+      },
+      "path": "alpha_proteo_targets/1bj1_cropped.pdb",
+      "sha256": "53941a38339627b09628978f5373b32750e1f26d14253172de36800b44c3d4cf",
+      "target_id": "36_VEGFA"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "schema_version": "trex_target_registry.v1",
+  "targets": {
+    "betv1": {
+      "config": "betv1.json",
+      "pdb": "bindcraft_targets/BetV1.pdb",
+      "target_id": "23_BetV1"
+    },
+    "cbago": {
+      "config": "cbago.json",
+      "pdb": "bindcraft_targets/CbAgo_cropped_PAZ.pdb",
+      "target_id": "26_CbAgo"
+    },
+    "cd45": {
+      "config": "cd45.json",
+      "pdb": "bindcraft_targets/CD45.pdb",
+      "target_id": "05_CD45"
+    },
+    "her2aav": {
+      "config": "her2aav.json",
+      "pdb": "bindcraft_targets/HER2_cropped.pdb",
+      "target_id": "28_HER2_AAV"
+    },
+    "il17a": {
+      "config": "il17a.json",
+      "pdb": "alpha_proteo_targets/4hsa_cropped.pdb",
+      "target_id": "37_IL17A"
+    },
+    "il7ra": {
+      "config": "il7ra.json",
+      "pdb": "alpha_proteo_targets/3di3_cropped.pdb",
+      "target_id": "31_IL7RA"
+    },
+    "pdl1": {
+      "config": "pdl1.json",
+      "pdb": "alpha_proteo_targets/5o45_repacked.pdb",
+      "target_id": "32_PDL1_ALPHA_REPACK"
+    },
+    "sc2rbd": {
+      "config": "sc2rbd.json",
+      "pdb": "alpha_proteo_targets/6m0j_cropped.pdb",
+      "target_id": "30_SC2RBD"
+    },
+    "tnfalpha": {
+      "config": "tnfalpha.json",
+      "pdb": "alpha_proteo_targets/1tnf_repacked.pdb",
+      "target_id": "38_TNFalpha_REPACK"
+    },
+    "vegfa": {
+      "config": "vegfa.json",
+      "pdb": "alpha_proteo_targets/1bj1_cropped.pdb",
+      "target_id": "36_VEGFA"
+    }
+  }
+}

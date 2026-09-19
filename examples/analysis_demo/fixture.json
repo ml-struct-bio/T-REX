@@ -1,0 +1,8 @@
+{
+  "synthetic": true,
+  "target_id": "synthetic_demo",
+  "designs": [
+    {"result_id": "demo_qualified", "metrics": {"pLDDT": 95.0, "iPAE": 0.15, "binder_scRMSD": 1.0}},
+    {"result_id": "demo_unqualified", "metrics": {"pLDDT": 50.0, "iPAE": 0.8, "binder_scRMSD": 5.0}}
+  ]
+}

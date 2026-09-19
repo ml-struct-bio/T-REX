@@ -1,0 +1,29 @@
+{
+  "content_sha256": "3022126a2617a96ded10604eba039b6fcd1ad094512291c2eab9429f463dc160",
+  "files": [
+    {
+      "path": "v_48_002.pt",
+      "sha256": "925f2ca1007bf9b02e0e7f420ff00eb91f50fcc2722f64b42e644ae95adaa131",
+      "size": 6681301
+    },
+    {
+      "path": "v_48_010.pt",
+      "sha256": "db866fae956a28661f926053d630610c55e9fc4bc03922f2aeeb98a37435ccce",
+      "size": 6681301
+    },
+    {
+      "path": "v_48_020.pt",
+      "sha256": "c9cb4a671d79604111231f8dbfc7c590e06f1197453b7a6854ac6661a642f5bd",
+      "size": 6681301
+    },
+    {
+      "path": "v_48_030.pt",
+      "sha256": "c34b7bfb38418ea30989fda3314f4781ac4e3920f9825731cf555f1fed44ac66",
+      "size": 6681301
+    }
+  ],
+  "model_name": "vanilla_model_weights",
+  "n_files": 4,
+  "schema_version": "v7.3.3_model_manifest_v1",
+  "total_bytes": 26725204
+}

@@ -1,0 +1,408 @@
+"""Gap A': Recipe extraction from past results."""
+
+from __future__ import annotations
+
+import pytest
+
+from trex.evidence_reducer import (
+    ReducerConfig,
+    _classify_result,
+    _recipe_signature,
+    extract_recipes,
+)
+from trex.schemas import ActionCandidate, FeasibilityCheck, ResultRecord
+
+
+def _r(rid: str, *, family: str = "complexa_beam", panel_ready: bool = False,
+       pLDDT: float | None = None, iPAE: float | None = None, scRMSD: float | None = None,
+       exit_status: str = "ok") -> ResultRecord:
+    m: dict[str, float] = {}
+    if pLDDT is not None: m["pLDDT"] = pLDDT
+    if iPAE is not None: m["iPAE"] = iPAE
+    if scRMSD is not None: m["binder_scRMSD"] = scRMSD
+    return ResultRecord(
+        result_id=rid, parent_ids=[], target_id="t", backend_family=family,
+        runtime_bucket_id="rb1", metrics=m, metrics_calibrated=dict(m),
+        route_lineage=[], gpu_h=1.0, exit_status=exit_status,  # type: ignore[arg-type]
+        panel_ready=panel_ready,
+    )
+
+
+def _ac(cand_id: str, *, op: str = "complexa_beam_default", family: str = "complexa_beam",
+        config: dict | None = None, parent_result_id: str | None = None) -> ActionCandidate:
+    feas = FeasibilityCheck(True, "rb1", True, True, True, True)
+    return ActionCandidate(
+        candidate_id=cand_id, hypothesis_ids=["h1"], parent_result_id=parent_result_id,
+        method_family=family, operator_id=op, lane_id=family,
+        config_delta=config or {}, downstream_route_plan=[],
+        estimated_cost_class="standard", expected_signal="x",
+        evidence_refs=[], feasibility=feas,
+    )
+
+
+def test_classify_strict_success():
+    r = _r("r1", pLDDT=92.0, iPAE=0.20, scRMSD=1.3)
+    assert _classify_result(r, ReducerConfig()) == "strict_success"
+
+
+def test_classify_panel_ready_overrides_strict():
+    r = _r("r1", pLDDT=92.0, iPAE=0.20, scRMSD=1.3, panel_ready=True)
+    assert _classify_result(r, ReducerConfig()) == "panel_ready"
+
+
+def test_classify_near_miss_single_axis():
+    # iPAE fails, pLDDT passes, scRMSD passes
+    r = _r("r1", pLDDT=92.0, iPAE=0.55, scRMSD=1.3)
+    assert _classify_result(r, ReducerConfig()) == "near_miss"
+
+
+def test_classify_joint_fail():
+    r = _r("r1", pLDDT=70.0, iPAE=0.55, scRMSD=1.3)
+    assert _classify_result(r, ReducerConfig()) == "joint_fail"
+
+
+def test_classify_skips_failed_exit():
+    r = _r("r1", pLDDT=92.0, iPAE=0.20, scRMSD=1.3, exit_status="timeout")
+    assert _classify_result(r, ReducerConfig()) is None
+
+
+def test_signature_stable_across_dict_order():
+    s1 = _recipe_signature("op", {"a": 1, "b": 2})
+    s2 = _recipe_signature("op", {"b": 2, "a": 1})
+    assert s1 == s2
+
+
+def test_signature_differs_on_value_change():
+    s1 = _recipe_signature("op", {"beam_width": 4})
+    s2 = _recipe_signature("op", {"beam_width": 8})
+    assert s1 != s2
+
+
+def test_extract_recipes_aggregates_strict_successes():
+    """Three strict successes sharing the same (operator, config) should
+    collapse to one Recipe with descendant_count=3."""
+    results = [
+        _r(f"r{i}", pLDDT=92, iPAE=0.20, scRMSD=1.3) for i in range(3)
+    ]
+    cand = _ac("c1", config={"beam_width": 4, "n_branch": 8})
+    spawning = {r.result_id: cand for r in results}
+    recipes = extract_recipes(results, spawning_action=spawning)
+    strict_recipes = [r for r in recipes if r.recipe_class == "strict_success"]
+    assert len(strict_recipes) == 1
+    assert strict_recipes[0].descendant_count == 3
+    assert strict_recipes[0].config_delta == {"beam_width": 4, "n_branch": 8}
+
+
+def test_extract_recipes_separates_classes():
+    """Strict + near-miss + joint-fail should each produce their own recipe."""
+    rs = [
+        _r("r1", pLDDT=92, iPAE=0.20, scRMSD=1.3),       # strict
+        _r("r2", pLDDT=92, iPAE=0.55, scRMSD=1.3),       # near-miss (iPAE only)
+        _r("r3", pLDDT=70, iPAE=0.55, scRMSD=1.3),       # joint fail
+    ]
+    recipes = extract_recipes(rs)
+    classes = {r.recipe_class for r in recipes}
+    assert "strict_success" in classes
+    assert "near_miss" in classes
+    assert "joint_fail" in classes
+
+
+def test_extract_recipes_top_k_limit():
+    """§22.8.10 (stratified): strict_success now uses 4+4+4 quality/count/
+    recency selection regardless of `top_strict`. With only 3 distinct
+    recipes and identical metrics, dedup keeps all 3 (not 2). The
+    `top_strict` kwarg is preserved for back-compat but no longer applies
+    to strict_success — it only constrained non-stratified output."""
+    cands = [
+        _ac(f"c{i}", config={"beam_width": w})
+        for i, w in enumerate([4, 8, 16])
+    ]
+    results: list[ResultRecord] = []
+    spawning = {}
+    # recipe A: 3 strict descendants
+    for i in range(3):
+        r = _r(f"a{i}", pLDDT=92, iPAE=0.20, scRMSD=1.3)
+        results.append(r); spawning[r.result_id] = cands[0]
+    # recipe B: 2 strict descendants
+    for i in range(2):
+        r = _r(f"b{i}", pLDDT=92, iPAE=0.20, scRMSD=1.3)
+        results.append(r); spawning[r.result_id] = cands[1]
+    # recipe C: 1 strict descendant
+    r = _r("c0", pLDDT=92, iPAE=0.20, scRMSD=1.3)
+    results.append(r); spawning[r.result_id] = cands[2]
+
+    recipes = extract_recipes(results, spawning_action=spawning, top_strict=2)
+    strict = [r for r in recipes if r.recipe_class == "strict_success"]
+    # All 3 distinct recipes appear: identical quality → all win quality
+    # tier; descendant_count ordering still represented; recency tied (same
+    # tick). The stratified policy doesn't discard a winner just because the
+    # caller passes a smaller top_strict (that param is now defaulted-only).
+    assert len(strict) == 3
+    counts = sorted([r.descendant_count for r in strict], reverse=True)
+    assert counts == [3, 2, 1]
+
+
+def test_extract_recipes_fallback_when_no_spawning():
+    """Without ActionCandidate info, fall back to (family, {}) signature."""
+    results = [_r(f"r{i}", pLDDT=92, iPAE=0.20, scRMSD=1.3) for i in range(3)]
+    recipes = extract_recipes(results, spawning_action={})
+    strict = [r for r in recipes if r.recipe_class == "strict_success"]
+    assert len(strict) == 1
+    assert strict[0].operator_id == "complexa_beam_default"
+    assert strict[0].descendant_count == 3
+
+
+def test_stratified_strict_success_preserves_early_high_quality_winner():
+    """§22.8.10: an old recipe with the BEST quality must NOT be pruned
+    by newer recipes with more replicas. Pre-fix the sort was
+    (descendant_count, recency) — early high-quality winner got bumped
+    once newer recipes accumulated more descendants.
+    """
+    # Recipe A: early (tick 5), high quality (pLDDT=95, iPAE=0.15, scRMSD=0.5),
+    #           only 1 descendant.
+    # Recipes B-E: late (tick 80-83), mediocre quality (pLDDT=91, iPAE=0.22,
+    #              scRMSD=1.4), 8 descendants each.
+    cands = {
+        "A": _ac("cA", family="bindcraft", config={"max_traj": 16}),
+    }
+    for i in range(4):
+        cands[f"L{i}"] = _ac(f"cL{i}", family="complexa_beam", config={"beam": 8, "n_branch": i})
+
+    results = []
+    spawning = {}
+    # Recipe A: 1 early high-quality strict success (tick 5)
+    r = ResultRecord(
+        result_id="rA", parent_ids=[], target_id="t",
+        backend_family="bindcraft", runtime_bucket_id="rb1",
+        metrics={"pLDDT": 95.0, "iPAE": 0.15, "binder_scRMSD": 0.5},
+        metrics_calibrated={}, route_lineage=[], gpu_h=1.0,
+        exit_status="ok", panel_ready=False, tick_id="v7r005",
+    )
+    results.append(r)
+    spawning[r.result_id] = cands["A"]
+
+    # Recipes B-E: 8 mediocre strict_success each, all at recent ticks 80-83
+    for ri, fam_key in enumerate(("L0", "L1", "L2", "L3")):
+        for j in range(8):
+            r = ResultRecord(
+                result_id=f"r{fam_key}_{j}", parent_ids=[], target_id="t",
+                backend_family="complexa_beam", runtime_bucket_id="rb1",
+                metrics={"pLDDT": 91.0, "iPAE": 0.22, "binder_scRMSD": 1.4},
+                metrics_calibrated={}, route_lineage=[], gpu_h=1.0,
+                exit_status="ok", panel_ready=False,
+                tick_id=f"v7r{80+ri:03d}",
+            )
+            results.append(r)
+            spawning[r.result_id] = cands[fam_key]
+
+    recipes = extract_recipes(results, spawning_action=spawning, current_tick=100)
+    strict = [r for r in recipes if r.recipe_class == "strict_success"]
+
+    # The early high-quality bindcraft recipe MUST be present in the output
+    # (it's #1 by quality even though dead-last by count/recency).
+    bindcraft_strict = [r for r in strict if r.method_family == "bindcraft"]
+    assert len(bindcraft_strict) == 1, (
+        f"Early high-quality bindcraft winner pruned! got recipes: "
+        f"{[(r.method_family, r.descendant_count, r.recency_tick) for r in strict]}"
+    )
+    # Quality score: pLDDT margin (95-90)/5=1.0, iPAE margin (7/31-0.15)/0.05=1.52,
+    # scRMSD margin (1.5-0.5)/0.3=3.33 → total ~5.85. Mediocre ones ~0.
+    # The bindcraft entry should be a strict_success recipe.
+    assert bindcraft_strict[0].descendant_count == 1
+    assert bindcraft_strict[0].recency_tick == 5
+
+
+def test_stratified_dedup_when_same_recipe_top_in_multiple_buckets():
+    """A recipe that is BOTH most-quality AND most-recent shouldn't appear
+    twice in the output (dedup by recipe_hash)."""
+    cands = {"A": _ac("cA", family="bindcraft", config={"x": 1})}
+    results = []
+    spawning = {}
+    # Single high-quality + recent + few-descendants recipe
+    for i in range(3):
+        r = ResultRecord(
+            result_id=f"r{i}", parent_ids=[], target_id="t",
+            backend_family="bindcraft", runtime_bucket_id="rb1",
+            metrics={"pLDDT": 96.0, "iPAE": 0.12, "binder_scRMSD": 0.4},
+            metrics_calibrated={}, route_lineage=[], gpu_h=1.0,
+            exit_status="ok", panel_ready=False, tick_id="v7r050",
+        )
+        results.append(r)
+        spawning[r.result_id] = cands["A"]
+    recipes = extract_recipes(results, spawning_action=spawning, current_tick=51)
+    strict = [r for r in recipes if r.recipe_class == "strict_success"]
+    assert len(strict) == 1  # de-duped, not 3 copies (quality/count/recency)
+
+
+def test_method_health_strict_yield_su_dedup():
+    """§22.8.11: per-family SU count = distinct foldseek bins among
+    strict-pass records of that family. Distinguishes 7-raw-strict (1
+    cluster) from genuinely diverse output."""
+    from trex.evidence_reducer import method_health
+    rs = []
+    # Family A: 5 strict passes but all in ONE foldseek cluster
+    for i in range(5):
+        rs.append(ResultRecord(
+            result_id=f"rA{i}", parent_ids=[], target_id="t",
+            backend_family="bindcraft", runtime_bucket_id="rb1",
+            metrics={"pLDDT": 95.0, "iPAE": 0.15, "binder_scRMSD": 0.5},
+            metrics_calibrated={}, route_lineage=[], gpu_h=0.2,
+            exit_status="ok", panel_ready=False,
+            # SU dedup reads foldseek_su (strict-only SSOT, 2026-05-31)
+            bins={"foldseek": "foldseek:repA", "foldseek_su": "foldseek:repA"},  # same cluster
+        ))
+    # Family B: 3 strict passes in 3 distinct clusters
+    for i in range(3):
+        rs.append(ResultRecord(
+            result_id=f"rB{i}", parent_ids=[], target_id="t",
+            backend_family="complexa_beam", runtime_bucket_id="rb1",
+            metrics={"pLDDT": 95.0, "iPAE": 0.15, "binder_scRMSD": 0.5},
+            metrics_calibrated={}, route_lineage=[], gpu_h=0.2,
+            exit_status="ok", panel_ready=False,
+            bins={"foldseek": f"foldseek:repB_{i}", "foldseek_su": f"foldseek:repB_{i}"},  # distinct clusters
+        ))
+    mh = method_health(rs)
+    # bindcraft: 5 raw strict, 1 SU (all same cluster)
+    assert mh["bindcraft"].strict_yield == 5
+    assert mh["bindcraft"].strict_yield_su == 1, (
+        f"expected SU=1, got {mh['bindcraft'].strict_yield_su}"
+    )
+    # complexa_beam: 3 raw strict, 3 SU (all distinct)
+    assert mh["complexa_beam"].strict_yield == 3
+    assert mh["complexa_beam"].strict_yield_su == 3
+
+
+def _strict_rec(rid, family, su_bin, exit_status="ok"):
+    return ResultRecord(
+        result_id=rid, parent_ids=[], target_id="t", backend_family=family,
+        runtime_bucket_id="rb1",
+        metrics={"pLDDT": 95.0, "iPAE": 0.15, "binder_scRMSD": 0.5},
+        metrics_calibrated={}, route_lineage=[], gpu_h=0.5,
+        exit_status=exit_status, panel_ready=False,  # type: ignore[arg-type]
+        bins={"foldseek_su": su_bin},
+    )
+
+
+def test_method_health_per_family_su_no_cross_family_double_count():
+    """MED-1 (2026-05-31): a foldseek_su cluster shared by TWO families is owned
+    by ONE → sum(per-family strict_yield_su) == run-level distinct clusters.
+    Without owner-attribution the shared cluster counted in BOTH families."""
+    from trex.evidence_reducer import method_health
+    rs = [
+        _strict_rec("a", "complexa_beam", "shared"),
+        _strict_rec("b", "complexa_fk_steering", "shared"),  # same structure, other family
+        _strict_rec("c", "complexa_beam", "other"),
+    ]
+    mh = method_health(rs)
+    total = sum(m.strict_yield_su for m in mh.values())
+    assert total == 2, f"shared cluster counts once across families; got sum={total}"
+
+
+def test_strict_yield_requires_exit_ok():
+    """ssot_sweep LOW (2026-05-31): strict_yield must share strict_yield_su's
+    exit_status=='ok' eligibility, else a failed-exit strict-metric record gives
+    strict_yield=1 but strict_yield_su=0 → phantom mode-collapse signal."""
+    from trex.evidence_reducer import method_health
+    mh = method_health([_strict_rec("x", "complexa_beam", "c", exit_status="timeout")])
+    assert mh["complexa_beam"].strict_yield == 0
+    assert mh["complexa_beam"].strict_yield_su == 0
+
+
+def test_method_health_strict_yield_su_requires_official_foldseek_bin():
+    """When foldseek_su is missing, strict records remain strict_yield evidence
+    but must not mint official SU credit."""
+    from trex.evidence_reducer import method_health
+    rs = []
+    for i in range(3):
+        rs.append(ResultRecord(
+            result_id=f"r{i}", parent_ids=[], target_id="t",
+            backend_family="bindcraft", runtime_bucket_id="rb1",
+            metrics={"pLDDT": 95.0, "iPAE": 0.15, "binder_scRMSD": 0.5},
+            metrics_calibrated={}, route_lineage=[], gpu_h=0.2,
+            exit_status="ok", panel_ready=False,
+            bins={"design": f"d{i}"},  # NO foldseek key
+        ))
+    mh = method_health(rs)
+    assert mh["bindcraft"].strict_yield == 3
+    assert mh["bindcraft"].strict_yield_su == 0
+
+
+def test_chained_refilter_success_credits_upstream_generator():
+    """BindCraft/BoltzGen/MPNN strict SU is re-scored on structure_refilter
+    records, but the PRIMARY strict_yield_su ledger now credits the GENERATING
+    family (v7_3 SU-attribution fix via resolve_generating_family) — the
+    structure_refilter re-scorer gets 0 own SU. Previously the primary field
+    mis-credited the re-scorer and only the secondary chained_strict_yield_su
+    compensated; that mis-taught the planner's exploit/mode logic."""
+    from trex.evidence_reducer import method_health
+    parent = ResultRecord(
+        result_id="bc_parent", parent_ids=["bc_cand"], target_id="t",
+        backend_family="bindcraft", runtime_bucket_id="rb1",
+        metrics={}, metrics_calibrated={}, route_lineage=[], gpu_h=2.0,
+        exit_status="ok", panel_ready=False,
+    )
+    child = ResultRecord(
+        result_id="refilter_child", parent_ids=["chain_cand", "bc_parent"], target_id="t",
+        backend_family="structure_refilter", runtime_bucket_id="rb1",
+        metrics={"pLDDT": 95.0, "iPAE": 0.15, "binder_scRMSD": 0.8},
+        metrics_calibrated={}, route_lineage=[], gpu_h=0.05,
+        exit_status="ok", panel_ready=False, bins={"foldseek_su": "FS_new"},
+    )
+    spawning = {
+        "bc_parent": _ac(
+            "bc_cand", family="bindcraft", op="bindcraft_default",
+            config={"max_trajectories": 16},
+        ),
+        "refilter_child": _ac(
+            "chain_cand", family="structure_refilter", op="af2_multimer",
+            parent_result_id="bc_parent",
+        ),
+    }
+    mh = method_health([parent, child], spawning)
+    # v7_3 fix: the GENERATOR (bindcraft) gets the SU in the PRIMARY ledger; the
+    # re-scorer gets 0 own SU (resolved via parent_ids[1]=bc_parent here).
+    assert mh["structure_refilter"].strict_yield_su == 0
+    assert mh["structure_refilter"].su_per_gpu_h is None
+    assert mh["bindcraft"].strict_yield_su == 1
+    # chained_strict_yield_su still credits bindcraft (now a redundant alias of
+    # the corrected primary strict_yield_su; kept for backward compatibility).
+    assert mh["bindcraft"].chained_strict_yield_su == 1
+    # F2 (2026-05-31): ROUTE-LEVEL cost — denominator = upstream bindcraft gpu_h
+    # (2.0) + the downstream structure_refilter scoring gpu_h (0.05) it spawned
+    # = 2.05, so the diagnostic-lane chained rate is directly comparable to a
+    # Complexa family whose own su_per_gpu_h already bundles internal AF2.
+    # (Was upstream-only 1/2.0 = 0.5, which over-credited the lane.)
+    assert mh["bindcraft"].chained_su_per_gpu_h == 1.0 / 2.05
+
+
+def test_chained_refilter_recipe_uses_upstream_config():
+    parent = ResultRecord(
+        result_id="bc_parent", parent_ids=["bc_cand"], target_id="t",
+        backend_family="bindcraft", runtime_bucket_id="rb1",
+        metrics={}, metrics_calibrated={}, route_lineage=[], gpu_h=2.0,
+        exit_status="ok", panel_ready=False,
+    )
+    child = ResultRecord(
+        result_id="refilter_child", parent_ids=["chain_cand", "bc_parent"], target_id="t",
+        backend_family="structure_refilter", runtime_bucket_id="rb1",
+        metrics={"pLDDT": 95.0, "iPAE": 0.15, "binder_scRMSD": 0.8},
+        metrics_calibrated={}, route_lineage=[], gpu_h=0.05,
+        exit_status="ok", panel_ready=False, bins={"foldseek_su": "FS_new"},
+    )
+    spawning = {
+        "bc_parent": _ac(
+            "bc_cand", family="bindcraft", op="bindcraft_default",
+            config={"max_trajectories": 16},
+        ),
+        "refilter_child": _ac(
+            "chain_cand", family="structure_refilter", op="af2_multimer",
+            parent_result_id="bc_parent",
+        ),
+    }
+    recipes = extract_recipes([parent, child], spawning_action=spawning)
+    strict = [r for r in recipes if r.recipe_class == "strict_success"]
+    assert len(strict) == 1
+    assert strict[0].method_family == "bindcraft"
+    assert strict[0].operator_id == "bindcraft_default"
+    assert strict[0].config_delta == {"max_trajectories": 16}
+    assert strict[0].su_per_gpu_h is not None

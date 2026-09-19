@@ -1,0 +1,415 @@
+{
+  "content_sha256": "77409ac00f81e48d29b9f079ab448044a5ec1cdd91dfdb50b3035c197f065722",
+  "files": [
+    {
+      "path": ".gitattributes",
+      "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930",
+      "size": 1570
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
+      "size": 11343
+    },
+    {
+      "path": "README.md",
+      "sha256": "642e64db1e72483f132899f86801dedad9f38ee024acc515b7288a5ee74a2f01",
+      "size": 62858
+    },
+    {
+      "path": "chat_template.jinja",
+      "sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259",
+      "size": 7764
+    },
+    {
+      "path": "config.json",
+      "sha256": "885e6830f8d6883fefd63e3608c267452da2e6ce353a3494f42a7aa3d70c8434",
+      "size": 51346
+    },
+    {
+      "path": "configuration.json",
+      "sha256": "2d4464e2ead06bc9bc718c781309ad1e7baded626d66e8dcdc8b469ba185faf0",
+      "size": 51
+    },
+    {
+      "path": "generation_config.json",
+      "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e",
+      "size": 202
+    },
+    {
+      "path": "layers-0.safetensors",
+      "sha256": "5a6c052e37a754549e8f81c6fb32b050419f0fc2f71598817e08d0446b3f309d",
+      "size": 383865448
+    },
+    {
+      "path": "layers-1.safetensors",
+      "sha256": "9a2efd1048386e560c8241c7b972e213b516f0cbeafc4de6f486bd7faddb8c39",
+      "size": 383865448
+    },
+    {
+      "path": "layers-10.safetensors",
+      "sha256": "ebc4fd84671c2ac2d8d7b8da3707ed5d30738771a22eecc883d707521ed513a0",
+      "size": 383865472
+    },
+    {
+      "path": "layers-11.safetensors",
+      "sha256": "9daf0f0b763489c0869061669293f93213d6060b1b0c88061b53bb97f9082cd6",
+      "size": 372313760
+    },
+    {
+      "path": "layers-12.safetensors",
+      "sha256": "922729fcaedaece39e7b0fba137e3b900fbc3fe6bd8a85b16a215658be86938f",
+      "size": 383865472
+    },
+    {
+      "path": "layers-13.safetensors",
+      "sha256": "61c0a820b09d58e45e516c56532007155b0fd214c11fa8906640c9217da95c84",
+      "size": 383865472
+    },
+    {
+      "path": "layers-14.safetensors",
+      "sha256": "c2faab3a2ecddde0e762b3870c75f6fd83886edbabbd99ac40d641122d29e652",
+      "size": 383865472
+    },
+    {
+      "path": "layers-15.safetensors",
+      "sha256": "e75fbe4de60c0420912b91f379c29c95a49644feee6fe8a0bd3dd638ae07ea2b",
+      "size": 372313760
+    },
+    {
+      "path": "layers-16.safetensors",
+      "sha256": "84776e1d0a62c40730a4bc0f0e2c68242ba9a6150975d8992747fb6ecc0ebfcc",
+      "size": 383865472
+    },
+    {
+      "path": "layers-17.safetensors",
+      "sha256": "c7e32717b97f9553d62734f01bed4cc970dcf6bd3d5ba67c7704290656523d7e",
+      "size": 383865472
+    },
+    {
+      "path": "layers-18.safetensors",
+      "sha256": "1c6aed5f416dee34bb7ccfc322e0aa33f192b40afeab4b69fce784b2b349e253",
+      "size": 383865472
+    },
+    {
+      "path": "layers-19.safetensors",
+      "sha256": "63e1b8af41de9851ed279f9d4f42566febf81d13ae47e469ea1009a26c6b64e0",
+      "size": 372313760
+    },
+    {
+      "path": "layers-2.safetensors",
+      "sha256": "c2709097f77e8ec7204f908f54d7b84343139163e600815789124cbf15a709c6",
+      "size": 383865448
+    },
+    {
+      "path": "layers-20.safetensors",
+      "sha256": "c5945b2e40f3d97cb01d0cedcb60ea36f61ab585179ab0c02fdeec3d360f724d",
+      "size": 383865472
+    },
+    {
+      "path": "layers-21.safetensors",
+      "sha256": "c8a7696ad5cd1be016cfc553351ee4b588f3d972084dd47028db8dba9b113870",
+      "size": 383865472
+    },
+    {
+      "path": "layers-22.safetensors",
+      "sha256": "08481a6a46057d0bcdcd2598d4f67d5f821725fc483800cd360c2d7047907e08",
+      "size": 383865472
+    },
+    {
+      "path": "layers-23.safetensors",
+      "sha256": "13b2ba6536c77330fa1c40e91c4c707d5086803299e0f57dd03142bb28faaaa4",
+      "size": 372313760
+    },
+    {
+      "path": "layers-24.safetensors",
+      "sha256": "0f7855ee6b018e707d015f445f7e8b9542003104dbd0436e83e8c0dec73bdd17",
+      "size": 383865472
+    },
+    {
+      "path": "layers-25.safetensors",
+      "sha256": "fe49c034e095263e51b391895ccb5098741e06d75a6788769beb72fd50708846",
+      "size": 383865472
+    },
+    {
+      "path": "layers-26.safetensors",
+      "sha256": "14f086ff505e9df89c2fb938c947b0d023f6f19d3cecdc7f03a70caf36ea6ed4",
+      "size": 383865472
+    },
+    {
+      "path": "layers-27.safetensors",
+      "sha256": "4fa89a43e7196b18e6c67478aeedc1b3ab4853fa3bc4305d4ac73341b70e7e24",
+      "size": 372313760
+    },
+    {
+      "path": "layers-28.safetensors",
+      "sha256": "f10aecd4f9800052bbf1ad2cca939eb44dc205d42ff546096ce9212bd6eae411",
+      "size": 383865472
+    },
+    {
+      "path": "layers-29.safetensors",
+      "sha256": "633058fe6f1ec434c79e5c50d04c83b1955d52ca1889b1adca0e2db1cad9fa16",
+      "size": 383865472
+    },
+    {
+      "path": "layers-3.safetensors",
+      "sha256": "a874cf17d3480894aa13eb34568e1025f10c4d6b96f483cd93be583849312a0f",
+      "size": 372313744
+    },
+    {
+      "path": "layers-30.safetensors",
+      "sha256": "f9af47cefbdb300129c25eee1127c50629d9a2eba7f862a58a430a2cb378cf55",
+      "size": 383865472
+    },
+    {
+      "path": "layers-31.safetensors",
+      "sha256": "2a2e87f569b5da06a87b83df628cb27f491f3dbed55ca82054820cb382cffd2e",
+      "size": 372313760
+    },
+    {
+      "path": "layers-32.safetensors",
+      "sha256": "ca63c9dc522a1f0efd39e2cd7f5fb0efdb4274eabce5c15cc9aab11463cb3bb8",
+      "size": 383865472
+    },
+    {
+      "path": "layers-33.safetensors",
+      "sha256": "bb8eb220efa6a599a4ee29914d59ca26fe13fe64ec6f9a5ccff300432abc572b",
+      "size": 383865472
+    },
+    {
+      "path": "layers-34.safetensors",
+      "sha256": "6e08147ff5c8e0d5d7207d62ede78d6194f1453165cfab940743ff327bb0e6e5",
+      "size": 383865472
+    },
+    {
+      "path": "layers-35.safetensors",
+      "sha256": "f4391ffd8245e648eeaad69954721f106ea0423a56f9abee921d3d2880d98c03",
+      "size": 372313760
+    },
+    {
+      "path": "layers-36.safetensors",
+      "sha256": "5b077d63785d5c2b20ab5c0b8895b08941af08bb5685a1b6a5a3292c3eac638f",
+      "size": 383865472
+    },
+    {
+      "path": "layers-37.safetensors",
+      "sha256": "d38c28d8c86cc147e5edc1935dec46687a6b3a8bc0d712e829003dd9cd4fab7d",
+      "size": 383865472
+    },
+    {
+      "path": "layers-38.safetensors",
+      "sha256": "1628a41fa5d3dbcf2ffde423530a9e94e7228e247e922e2269bd348071a76365",
+      "size": 383865472
+    },
+    {
+      "path": "layers-39.safetensors",
+      "sha256": "889c827bbff3fa6b78558dcdfd24670894b8a450395ec418e7a4f3202789e0b1",
+      "size": 372313760
+    },
+    {
+      "path": "layers-4.safetensors",
+      "sha256": "9eb31d85023776894347a56101ee067f369d0d3c024f1331f5c7cba1f45b6df4",
+      "size": 383865448
+    },
+    {
+      "path": "layers-40.safetensors",
+      "sha256": "5f90d2b2d16e5c51a078f21eed843d80c22af71401669577d274ea7f2c1ce95f",
+      "size": 383865472
+    },
+    {
+      "path": "layers-41.safetensors",
+      "sha256": "80877a16835f7311a112ad0bbaf1d19997142ea3e1df95ffe446fd52ad1f80d8",
+      "size": 383865472
+    },
+    {
+      "path": "layers-42.safetensors",
+      "sha256": "c1bf34d1a3e4d36b342c5c680bb12c4ce74f02530dff33b735fad27470ef2594",
+      "size": 383865472
+    },
+    {
+      "path": "layers-43.safetensors",
+      "sha256": "10eceff499a24e0072a40b960671f00fc5012d7451f22cb6883f358e085ce276",
+      "size": 372313760
+    },
+    {
+      "path": "layers-44.safetensors",
+      "sha256": "673543b94e59003265ae648bba11389c6735ee3264ec164108b6db99f1219587",
+      "size": 383865472
+    },
+    {
+      "path": "layers-45.safetensors",
+      "sha256": "77b8c7a9cc451a378ee8d6927ce1c4b9664adb83c4786440eec099591dc98f32",
+      "size": 383865472
+    },
+    {
+      "path": "layers-46.safetensors",
+      "sha256": "9ee06b8029b7812644bd5fb01b8bfea7b640353769d094ae59d8c82d986a8b7b",
+      "size": 383865472
+    },
+    {
+      "path": "layers-47.safetensors",
+      "sha256": "6a8e0ddb389485965cd30bd0a90d1be5e1acb65cb6311ce337199f268c3120f6",
+      "size": 372313760
+    },
+    {
+      "path": "layers-48.safetensors",
+      "sha256": "70bd74dcdf4ea8b09e1ae3463977a05aba73f2c02397491bb641a0a3ca6832a3",
+      "size": 383865472
+    },
+    {
+      "path": "layers-49.safetensors",
+      "sha256": "a3481f971433ecc9041f44a555e443ff124e037601b36eab0bb3057946e041e4",
+      "size": 383865472
+    },
+    {
+      "path": "layers-5.safetensors",
+      "sha256": "a8c9ea40638fd66bd8ab21940df215e7921b4af04646d758d74425be011a9b6f",
+      "size": 383865448
+    },
+    {
+      "path": "layers-50.safetensors",
+      "sha256": "1aa60d9cb7f867a2033be0b1ff053049f09a6623826dd0d37daed3281479b875",
+      "size": 383865472
+    },
+    {
+      "path": "layers-51.safetensors",
+      "sha256": "511f64772c1a5a15292eb1c48166b9d206088aed283185e10877fc43308097bd",
+      "size": 372313760
+    },
+    {
+      "path": "layers-52.safetensors",
+      "sha256": "92c35a4e850b4c0b87a1eab42c47996504e062a8a11699ada20fcea0b88f36c7",
+      "size": 383865472
+    },
+    {
+      "path": "layers-53.safetensors",
+      "sha256": "ab48cad204502ddbf17f5ee2d5e52457baac965300cc15e8a25f35c843b4d526",
+      "size": 383865472
+    },
+    {
+      "path": "layers-54.safetensors",
+      "sha256": "2804cee95e18e9e516b9490c36ea7f41553a3fcb4455cf44a361d6086ed214a3",
+      "size": 383865472
+    },
+    {
+      "path": "layers-55.safetensors",
+      "sha256": "543841981255fce51f0d84fe2db4de580594f6c6d6a590ae47ffbdbd01211571",
+      "size": 372313760
+    },
+    {
+      "path": "layers-56.safetensors",
+      "sha256": "9847da2610e67b1f0ff39d8d103c7814f95bb8ede4204d5ae3055a8589bb0313",
+      "size": 383865472
+    },
+    {
+      "path": "layers-57.safetensors",
+      "sha256": "32fe173c033e46648bc71bc8e5036565234c0c13ac66acb2ad84c9cbb426b90e",
+      "size": 383865472
+    },
+    {
+      "path": "layers-58.safetensors",
+      "sha256": "c9858a0c4bd8cb980829a45d3f9ca52a0bd506c6a0775eb179d3e5ebfaae7867",
+      "size": 383865472
+    },
+    {
+      "path": "layers-59.safetensors",
+      "sha256": "3c30fd14e883c15af50e2f647c2d0b8f3a2fca96904e4b37cc8bb1956a133606",
+      "size": 372313760
+    },
+    {
+      "path": "layers-6.safetensors",
+      "sha256": "ad8b704be0cde8a774c4a49af59336d2b48b574446c1eddff8ba35d20d05ae69",
+      "size": 383865448
+    },
+    {
+      "path": "layers-60.safetensors",
+      "sha256": "1f24aa7a99e72f658089462b258613b11d06d6e11733ff5d5f864c663a190f92",
+      "size": 383865472
+    },
+    {
+      "path": "layers-61.safetensors",
+      "sha256": "0b083f4afca3538f87545d4fc50817292fc80061a731a5f0235f5c406be87b45",
+      "size": 383865472
+    },
+    {
+      "path": "layers-62.safetensors",
+      "sha256": "b1e4c80f95241cc7d269d7cf6a35291c8b455f2d4f1381e4eafbfccb35add125",
+      "size": 383865472
+    },
+    {
+      "path": "layers-63.safetensors",
+      "sha256": "7e27ec71df803eb38ba93aead54daaf1110d3f7124416443a30a3c81abc1c805",
+      "size": 372313760
+    },
+    {
+      "path": "layers-7.safetensors",
+      "sha256": "2acb7e8d035d730a1c81c36c3b20ca15020b89d2bcd4462259f2ecb2a8dcb828",
+      "size": 372313744
+    },
+    {
+      "path": "layers-8.safetensors",
+      "sha256": "81ebe095241562b2e2ace8875e2771f0cdb68e76286a18506ea19a749b8de9b4",
+      "size": 383865448
+    },
+    {
+      "path": "layers-9.safetensors",
+      "sha256": "fdd926f3e8c335eb21a2b41cf635cb241f337a5d47310ef41ae3d43bf53410c3",
+      "size": 383865448
+    },
+    {
+      "path": "merges.txt",
+      "sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d",
+      "size": 3353259
+    },
+    {
+      "path": "model.safetensors.index.json",
+      "sha256": "6d19a4e607604c1ac631f810a56e6084c892b4cb0251c530c6a24fc877f9fb4b",
+      "size": 137335
+    },
+    {
+      "path": "mtp.safetensors",
+      "sha256": "9557770331f1f648eb96039f2a1e7cdc5742fe15c0f5777c43063b2c12a60f4c",
+      "size": 477202224
+    },
+    {
+      "path": "outside.safetensors",
+      "sha256": "27a91100d904f6acc1c86d08675691199e1fe2da5da613106fb01ae4809b3ac1",
+      "size": 6007102112
+    },
+    {
+      "path": "preprocessor_config.json",
+      "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516",
+      "size": 390
+    },
+    {
+      "path": "tokenizer.json",
+      "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+      "size": 12807982
+    },
+    {
+      "path": "tokenizer_config.json",
+      "sha256": "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b",
+      "size": 16718
+    },
+    {
+      "path": "video_preprocessor_config.json",
+      "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13",
+      "size": 385
+    },
+    {
+      "path": "vocab.json",
+      "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+      "size": 6722759
+    }
+  ],
+  "model_name": "Qwen3.6-27B-FP8",
+  "n_files": 80,
+  "schema_version": "v7.3.3_model_manifest_v1",
+  "total_bytes": 30890040890,
+  "upstream_repo": "Qwen/Qwen3.6-27B-FP8",
+  "upstream_revision": "ec4160bf26124fa57e6451d070ee0c459a36d5b7",
+  "upstream_revision_evidence": {
+    "metadata_relative_path": ".cache/huggingface/download/config.json.metadata",
+    "metadata_sha256": "22b001b799579e7168356dcc58575827771e5a03faa25264527152b6fd23abbc"
+  }
+}

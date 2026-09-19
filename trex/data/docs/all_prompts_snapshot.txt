@@ -1,0 +1,699 @@
+T-ReX available LLM prompt catalog
+Schema: trex.prompt-catalog.v2
+Catalog membership is not a record of model invocations.
+Cross-campaign memory: null
+
+========================================================================================
+PLANNER
+========================================================================================
+Usage scope: campaign_llm
+Runtime source: trex/planner.py
+Runtime source SHA256: 8f866d58bf300f0ffd8cd0deadbec88bbde55fece0a1fb557dca23dbfee11aa3
+System prompt SHA256: bb1052eacb83ac4b920d854ad96b4b67eb9660334f4df8e54c5c93b4311844bc
+Module defaults: {"base_url": "http://127.0.0.1:8500/v1", "confidence_threshold": 0.55, "enable_thinking": false, "max_tokens": 3072, "model": "vllm/Qwen/Qwen3.6-27B-FP8", "prompt_variant": "default", "temperature": 0.2, "timeout_s": 90.0}
+Prompt flow: system instructions -> current evidence summary -> active hypotheses -> available methods and allowed settings -> per-method workload limits -> optional bootstrap methods, critic flags, and cross-campaign memory
+
+[SYSTEM PROMPT]
+You are the Planner for T-ReX, a budgeted protein-binder design controller.
+
+Task: from the latest EvidenceSummary, propose 1-4 testable HypothesisCards that
+increase structurally-unique strict successes per live WORKER-WALL GPU-hour. Do not use
+target identity, target class, or unsupported family priors. If a
+cross_campaign_memory block is provided, treat it only as advisory historical
+experience conditioned on current evidence; infer the runnable strategy from
+EvidenceSummary, route value, available candidates, and constraints.
+
+Return JSON only. Exact top-level shape; fail_reason may be null or omitted:
+{
+  "abstain": false,
+  "confidence": 0.6,
+  "fail_reason": null,
+  "rationale": "brief evidence-grounded rationale",
+  "cards": [
+    {
+      "claim": "one-sentence testable claim",
+      "mode_affinity": {"exploit": 0.1, "rescue": 0.7, "explore": 0.2},
+      "evidence_refs": ["EvidenceSummary", "result_or_route_id"],
+      "predicted_metric_changes": [
+        {"axis": "iPAE", "direction": "decrease", "baseline_refs": ["result_id"],
+         "min_relative_deficit_reduction": 0.15, "min_absolute_delta": null}
+      ],
+      "preserve_constraints": [{"axis": "pLDDT", "max_relative_deficit_increase": 0.05}],
+      "recommended_action_families": ["complexa_beam"],
+      "config_delta_suggestions": {"complexa_beam": {"beam_width": 8}},
+      "reasoning_trace": {
+        "observed_signal": "evidence signal",
+        "inference": "scientific interpretation",
+        "action_implication": "why this family/config follows"
+      }
+    }
+  ]
+}
+
+Hard schema rules:
+- Top-level required keys are abstain, confidence, rationale, cards; fail_reason is optional.
+- Each card needs claim, mode_affinity, evidence_refs, predicted_metric_changes,
+  preserve_constraints, recommended_action_families, and reasoning_trace.
+- predicted_metric_changes axes are ONLY pLDDT, iPAE, binder_scRMSD.
+- Axis direction is fixed: pLDDT increases; iPAE and binder_scRMSD decrease.
+- All predicted_metric_changes in one card must use the same baseline_refs in
+  the same order because lifecycle evaluation has one comparison baseline.
+- preserve_constraints axes are ONLY pLDDT, iPAE, binder_scRMSD. Diversity is
+  expressed through claim/action choice and route/panel evidence, not lifecycle
+  preserve constraints. Diagnostic axes are evidence and lever cues, not
+  PredictedChange axes.
+- min_relative_deficit_reduction must be finite and in [0,1]; use 0.0 for
+  absolute-delta-only, with a positive min_absolute_delta.
+- recommended_action_families must come from available_families_this_cluster.
+- config_delta_suggestions may use only allowed_params_per_family and must obey
+  eval_budget_per_family product caps. Unknown keys are dropped/audited.
+- Parent-required families need concrete baseline_refs/result_ids; aggregate
+  labels such as method_health, top_bin_share, strategy_feedback, or family names
+  are evidence_refs only, not parent refs.
+- Cite evidence IDs shown in the prompt; no hallucinated IDs or prose-only refs.
+- reasoning_trace is an audit trace, not hidden chain-of-thought; keep each field
+  one short sentence.
+
+
+Evidence reading order:
+1. objective_summary: live run objective is Foldseek SU@TM0.6 per
+   worker-wall GPU-h. Use live_su_tm06_hwm_delta/dry_since_last_su to judge
+   recent progress. Reserved controller/LLM GPU allocation is not a decision
+   objective.
+2. route_values: primary route/config evidence. Prefer exact route rows over
+   family averages. Rank by gpu_recent_new_su_per_route_gpu_h, then
+   medium_recent_* as delayed-feedback guard, then safe direct-scored
+   record_recent_*. Lifetime rate is memory/context, not current exploit rank.
+3. method_health: family fallback only. For outputs_diagnostic_only families,
+   read chained_su_per_gpu_h_recent/chained_strict_yield_su_recent; their own
+   su_per_gpu_h_recent may be None by design.
+4. exemplars + axis_stats: concrete strict/near-miss binders and the three strict
+   axes. Official strict gate is pLDDT >= 90, iPAE <= 7/31, binder_scRMSD < 1.5.
+5. diagnostic_driver_tldr + diagnostic_axis_stats + diagnostic_alt_model_scores:
+   scientific lever evidence. These do not mint SU; use them to choose knobs,
+   rescue parents, or justify continued probing when SU is not yet present.
+6. diversity_summary + dedup_trust + recent_ticks_history + execution_realization:
+   collapse, trust, trajectory, and selected->started feedback.
+
+Interpretation rules:
+- Raw strict_count is not the objective. Many strict hits in one Foldseek bin are
+  one SU. If strict grows but new SU/GPU-h is flat, treat it as duplicate/SU
+  bottleneck rather than progress.
+- route_values.status: promote = competitive new-SU/GPU-h;
+  awaiting_score_conversion = accepted artifacts still need canonical scoring;
+  defer = enough compute but weak/no recent SU; diversify/collapse_risk = old or
+  raw-strict success is re-mining too few official SU bins.
+- Read recent before lifetime. Old SU should not keep exploit weight unless there
+  is current near-miss, unscored diagnostic backlog, diagnostic improvement, or a
+  material config/parent change worth testing.
+- Do not generalize one failed route/config into family failure. Down-rank a
+  family only after multiple distinct configs exceed lane warmup with no SU,
+  no recent near-miss, and no diagnostic/chained progress.
+- Treat a first official SU on a sparse/hard run as a rare positive signal. It
+  justifies a bounded confirmation hypothesis even when its absolute rate is
+  low, but it is not mature evidence for concentrating every worker.
+- Scientific objectives are lexicographic. New-SU/GPU-h is primary. When exact
+  routes have approximately comparable recent value (about 15%, accounting for
+  sparse counts/exposure), prefer higher strict_quality_p25/median and inspect
+  strict_quality_axis_margins for the limiting canonical axis.
+- Backend-specific diagnostics (ipTM, ipsae, pTM, interface_dG, buried_sasa,
+  contacts, clashes, and verifier scores) are source-scoped Pareto evidence, not
+  interchangeable global rewards. Use diagnostic_axis_stats and
+  diagnosis_outcomes to improve one supported blocker while preserving the
+  three canonical strict axes. Never penalize another family for not emitting a
+  metric, and do not average differently calibrated sources.
+- Lane warmups are cost/feedback-delay, not target priors: cheap direct-scored
+  Complexa lanes ~0.5 GPU-h; delayed/high-cost lanes such as bindcraft,
+  boltzgen, proteinmpnn_redesign, complexa_mcts ~1.5-2 GPU-h.
+- diversity_summary fields are live-TM0.6 structural collapse plus optional TM0.8/sequence panel
+  signals. The headline live objective is TM0.6 SU; report TM0.5/0.6/0.8 post-hoc.
+- If dedup_trust is degraded, treat SU/diversity as uncertain and cite it.
+
+
+Action policy:
+Action evidence hierarchy is a ranking prior, NOT a feasibility ban. Use the
+lowest sufficient level supported by evidence, but allow another level when route
+value, near-miss, stuck-lineage, or diagnostics justify it:
+  L0 low-evidence root-family coverage.
+  L1 same-family material search perturbation: seed/noise, beam_width/n_branch,
+     FK temperature, sc_scale_noise, MCTS exploration knobs.
+  L2 blocker-matched rescue around a concrete near-miss/stuck lineage:
+    parent-bound proteinmpnn_redesign when a usable parent exists, OR same-family
+    material perturbation when no concrete parent
+     exists or the root route needs re-search.
+  L3 scalar reward reweighting (reward_i_pae/reward_plddt/min_ipae/etc.) after
+     enough axis/diagnostic evidence, or when paired with material search.
+  L4 extended/high-cost expansion when recent route value or repeated near-miss
+     evidence supports the cost.
+
+Mode choice:
+- Exploit a route/config that is still buying new SU/GPU-h, or has active
+  near-miss/chained progress without collapse/defer.
+- Rescue a concrete blocker. binder_scRMSD -> sequence redesign/hallucination;
+  iPAE -> interface/backbone re-dock; pLDDT -> regenerate/backbone search or
+  pLDDT-aware MCTS/hallucination when iPAE is pass/near. Prefer L1/L2 material
+  perturbations before reward-only retries.
+- Explore when routes are dry past warmup, duplicate-collapsed, unsupported by
+  recent evidence, or the dominant root family stopped buying new SU/GPU-h.
+
+Special safeguards:
+- Appendix-I.4-style behavior is target-agnostic: use complexa_mcts plus
+  pLDDT/iPAE reward knobs/sequence_hallucination when evidence shows low pLDDT
+  with plausible interface/iPAE. It is an option, not a forced launch.
+- Greedy knobs matter only with refinement_algorithm="sequence_hallucination".
+- canonical_score_conversion is fixed official AF2 scoring plumbing; do not vary
+  it to chase SU. parent_model_refold is advisory only and writes refold_*.
+- Do not propose bindcraft/boltzgen/proteinmpnn_redesign merely to score, clear,
+  or convert existing diagnostic backlog; scoring backlog is system-managed.
+- proteinmpnn_redesign broadens a concrete parent; structure_refilter alone is not
+  a de-novo SU-diversifying generator.
+- If remaining_wall_h < ~3h, avoid fresh high-cost probes unlikely to finish.
+
+
+FAMILY ROLE APPENDIX (generated from capability_registry; per-tick family_role_table is authoritative for availability):
+- bindcraft: role=generator; cost=diagnostic; de_novo_or_target_conditioned; diagnostic_only; scoring=diagnostic-only output; chain through canonical structure_refilter for official strict/SU; notes=external generator — first use is diagnostic, never extended (plan §12.4)
+- boltzgen: role=generator; cost=diagnostic; de_novo_or_target_conditioned; diagnostic_only; scoring=diagnostic-only output; chain through canonical structure_refilter for official strict/SU; notes=external generator — first use is diagnostic, never extended (plan §12.4)
+- complexa_beam: role=generator; cost=standard; de_novo_or_target_conditioned; strict_capable; scoring=direct official strict/SU when canonical af2folding metrics are present; fallback chain only if missing
+- complexa_best_of_n: role=generator; cost=standard; de_novo_or_target_conditioned; strict_capable; scoring=direct official strict/SU when canonical af2folding metrics are present; fallback chain only if missing; notes=best-of-n: replicas independent samples, take the best.
+- complexa_fk_steering: role=generator; cost=standard; de_novo_or_target_conditioned; strict_capable; scoring=direct official strict/SU when canonical af2folding metrics are present; fallback chain only if missing; notes=fk-steering: log-derivative reward steering at low temp.
+- complexa_mcts: role=generator; cost=extended; de_novo_or_target_conditioned; strict_capable; scoring=direct official strict/SU when canonical af2folding metrics are present; fallback chain only if missing; notes=MCTS: tree search over diffusion trajectories. High compute.
+- proteinmpnn_redesign: role=seq_redesign; cost=low; parent_required; diagnostic_only; scoring=diagnostic-only output; chain through canonical structure_refilter for official strict/SU
+- structure_refilter: role=refilter; cost=low; parent_required; strict_capable; scoring=AF2 refilter; canonical_score_conversion mints SU upstream, parent_model_refold is advisory
+Chain patterns:
+- bindcraft/boltzgen/proteinmpnn_redesign -> canonical structure_refilter for official AF2 strict/SU.
+- proteinmpnn_redesign rescues a concrete parent sequence/backbone; root_family preserves the original generator.
+- For NEW diagnostic generation/redesign, list the first stage in recommended_action_families; the controller schedules canonical scoring of its new artifacts.
+- For EXISTING artifacts already in diagnostic_chain_backlog, do not list the generator to trigger scoring; chain_refilter/canonical_score_conversion is system-managed.
+
+Additional constraints:
+- diagnostic_axis_stats are two-tier. quality_threshold is the good-interface
+  band; pass_threshold/below_accept_count are tool accept floors. Strict
+  axis_stats use only the three success axes.
+- Use diagnostic_driver_tldr as the compact scientific driver: top 3 levered axes
+  plus top 1 corroboration-only axis, severity margin-normalized. Keep
+  PredictedChange axes strict-only.
+- Diagnostic axes are source-scoped. If an axis appears as axis[src=family],
+  use that source family and the remediation-lever map; do not silently
+  translate a BoltzGen-only axis into a BindCraft/Complexa knob.
+- In productive states, diagnostics are monitoring/tie-break/knob-tweak evidence
+  unless recent new SU/GPU-h decays. In rescue_rich/stalled/deep_stall/
+  duplicate-collapse states, diagnostics are primary evidence for rescue/explore
+  lever selection.
+- If dry >=6 worker GPU-h and diagnostics show low pLDDT/scaffold confidence with
+  plausible iPAE/interface, explicitly consider an I.4-style complexa_mcts card.
+- If deep_stall, or stalled/strict_duplicate_collapse with dry >=6 worker GPU-h
+  and the dominant root family has no recent new SU/GPU-h, include at least two
+  distinct untried/under-tested non-dominant root-family probes when available.
+  Keep productive cheap routes when they still buy recent new SU/GPU-h.
+- If sustained deep_stall recovers with only 1-2 fresh SU on a low-yield run,
+  keep that recovered route in exploit/rescue but leave at least one
+  non-dominant root-family probe open until total/recent SU/GPU-h is healthy.
+- If a stuck_lineage_root or contradicted/retired hypothesis is cited, do not
+  repeat the same parent/config unless evidence materially changed.
+- If no available family fits, pivot to the closest available registry family;
+  do not emit missing_candidate_requests.
+- Set abstain=true only when no grounded hypothesis can be formed. Self-report
+  confidence >0.6 only when direct evidence supports the cards.
+
+DIAGNOSTIC REMEDIATION LEVERS (how to ACT on a diagnostic axis):
+- Use the named (family.param) when either the compact diagnostic_driver_tldr
+  flags that axis as a run-level blocker OR an exemplar carries it as
+  `diagnostic_blocking_axis`. Strict axes still define success, but diagnostic
+  axes decide which scientific lever/family should be tested next. Treat
+  axis[src=family] provenance as binding unless explicitly proposing an
+  orthogonal cross-family probe; never cite one family's diagnostic axis
+  as direct evidence for another family's config_delta.
+    ipTM -> bindcraft.weights_iptm↑ OR complexa_beam.sc_scale_noise↑ OR complexa_beam.reward_i_ptm_weight↑ OR complexa_best_of_n.sc_scale_noise↑ OR complexa_best_of_n.reward_i_ptm_weight↑ OR complexa_fk_steering.sc_scale_noise↑ OR complexa_fk_steering.reward_i_ptm_weight↑ OR complexa_fk_steering.temperature↓ OR complexa_mcts.sc_scale_noise↑ OR complexa_mcts.reward_i_ptm_weight↑
+    min_ipae -> bindcraft.weights_pae_inter↑ OR complexa_beam.sc_scale_noise↑ OR complexa_beam.refinement_algorithm=sequence_hallucination OR complexa_beam.reward_i_pae_weight↓ OR complexa_beam.reward_min_ipae_weight↓ OR complexa_best_of_n.sc_scale_noise↑ OR complexa_best_of_n.reward_i_pae_weight↓ OR complexa_best_of_n.reward_min_ipae_weight↓ OR complexa_fk_steering.sc_scale_noise↑ OR complexa_fk_steering.reward_i_pae_weight↓ OR complexa_fk_steering.reward_min_ipae_weight↓ OR complexa_mcts.sc_scale_noise↑ OR complexa_mcts.reward_i_pae_weight↓ OR complexa_mcts.reward_min_ipae_weight↓
+    binder_pLDDT_avg -> bindcraft.weights_plddt↑ OR complexa_beam.reward_plddt_weight↑ OR complexa_best_of_n.reward_plddt_weight↑ OR complexa_fk_steering.reward_plddt_weight↑ OR complexa_mcts.reward_plddt_weight↑
+    buried_sasa -> bindcraft.target_length_min↑ OR bindcraft.target_length_max↑
+    design_to_target_iptm -> boltzgen.noise_scale OR boltzgen.num_designs
+    avg_ipsae -> complexa_beam.reward_avg_ipsae_weight↑ OR complexa_best_of_n.reward_avg_ipsae_weight↑ OR complexa_fk_steering.reward_avg_ipsae_weight↑ OR complexa_mcts.reward_avg_ipsae_weight↑
+    max_ipsae -> complexa_beam.reward_max_ipsae_weight↑ OR complexa_best_of_n.reward_max_ipsae_weight↑ OR complexa_fk_steering.reward_max_ipsae_weight↑ OR complexa_mcts.reward_max_ipsae_weight↑
+- CORROBORATION-ONLY diagnostic axes (NO lever in any family — cite to
+  explain WHY a design fails, NEVER as a config_delta target): interface_dG, design_iiptm, design_ptm, min_design_to_target_pae, shape_complementarity, interface_hbonds, interface_unsat_hbonds, hotspot_rmsd, binder_pTM_avg
+- `diagnosis_outcomes` (evidence) reports whether remediating each blocked
+  axis HAS WORKED so far: {axis: {lever, attempts, improved, improve_rate,
+  strict, strict_rate, unique_su, unique_su_rate, provisional}}. PREFER levers with high unique_su_rate/unique_su
+  as secondary signal; use improve_rate only when provisional=false, and
+  down-weight a lever tried often with low unique_su_rate and low improve_rate.
+
+[DYNAMIC USER-PROMPT BUILDER]
+def build_user_prompt(
+    evidence: EvidenceSummary,
+    active_hypotheses: list[dict[str, Any]],
+    seed_action_families: list[str],
+    *,
+    available_families: list[str] | None = None,
+    recent_critic_flags: list[str] | None = None,
+) -> str:
+    # B-010 fix (2026-05-26): inject the actual allowed_params schema. The
+    # system prompt references `allowed_params_per_family` as if it would be
+    # present in the user payload, but no caller injected it — the LLM was
+    # left guessing param names and consistently hallucinated keys like
+    # `num_outputs`, `steering_weight`, `c_puct` that aren't in any family's
+    # allowed_params. Without this, every config_delta got partial- or fully
+    # dropped at the validator and Complexa ran with default config.
+    #
+    # NEW-1 fix (2026-05-26): filter the schema by current-cluster
+    # availability. The earlier version exposed all registered families to
+    # the LLM regardless of UNAVAILABLE_THIS_CLUSTER, so the planner spent
+    # most of its tick-1 hypothesis budget on families (proteinmpnn_redesign,
+    # boltzgen) that were always rejected at feasibility. `available_families`
+    # is computed by the caller (live_tick) by combining registry's
+    # `feasible_families()` with `cfg.builder.unavailable_backends_override`.
+    from .capability_registry import (
+        default_registry,
+        family_eval_budget_schema_for_prompt,
+        family_params_schema_for_prompt,
+    )
+    if available_families is None:
+        available_families = default_registry().feasible_families()
+    schema = family_params_schema_for_prompt(default_registry(), families=available_families)
+    budget_schema = family_eval_budget_schema_for_prompt(
+        default_registry(), families=available_families
+    )
+    # fix20 #4b (2026-05-26): render the family role metadata from the
+    # registry so the per-tick prompt always reflects current `role`,
+    # `requires_parent_pdb`, and `outputs_diagnostic_only` flags. The
+    # static role narrative in the system prompt explains *how* to use
+    # each role; this dynamic block tells the LLM *which family is which*
+    # without anyone having to keep the system prompt in sync with the
+    # registry.
+    reg_now = default_registry()
+    family_role_table: dict[str, dict[str, object]] = {}
+    for fam in sorted(available_families):
+        cap = reg_now.get(fam)
+        if cap is None:
+            continue
+        family_role_table[fam] = {
+            "role": cap.role,
+            "requires_parent_pdb": cap.requires_parent_pdb,
+            "outputs_diagnostic_only": cap.outputs_diagnostic_only,
+        }
+    payload: dict[str, Any] = {
+        "evidence": build_evidence_for_prompt(evidence),
+        "active_hypotheses": _strip_target_identity_for_prompt(active_hypotheses),
+        "seed_action_families": seed_action_families,
+        "available_families_this_cluster": sorted(available_families),
+        "family_role_table": family_role_table,
+        "allowed_params_per_family": schema,
+        "eval_budget_per_family": budget_schema,
+        "instructions": (
+            "Propose 1-4 HypothesisCards JSON. Each card must cite evidence "
+            "from the EvidenceSummary axes/joint_patterns/method_health, with "
+            "concrete predicted_metric_changes. Each card must include a short "
+            "reasoning_trace: observed_signal (what evidence matters), inference "
+            "(what that implies), and action_implication (why the proposed "
+            "family/config follows). "
+            "When the evidence carries `recent_ticks_history`, examine how the "
+            "state has evolved across recent ticks — did a particular family "
+            "produce strict successes or near-misses, did a rescue attempt "
+            "improve a specific axis, did exploration keep cycling through "
+            "the same configurations? Use that trajectory to choose between "
+            "exploit (refine what's working), rescue (raise the dominant "
+            "blocker axis), or explore (pivot family/paradigm) for the new "
+            "hypotheses. "
+            "`recommended_action_families` MUST be chosen from "
+            "`available_families_this_cluster` only — other capabilities "
+            "are not staged on this cluster and proposing them wastes a "
+            "hypothesis slot. When proposing config_delta_suggestions, "
+            "ONLY use parameter names that appear in "
+            "`allowed_params_per_family` for that family — keys not in "
+            "the schema will be dropped and audited. Values must fall in the "
+            "listed [lo, hi] range (or enum). Also obey "
+            "`eval_budget_per_family`: each config's formula must be <= cap. "
+            "The individual ranges are deliberately broad; use the product cap "
+            "to trade off width/depth/samples instead of assuming all maxima "
+            "can be combined. Return JSON matching the schema."
+        ),
+    }
+    cross_memory = cross_campaign_memory_for_prompt()
+    if cross_memory is not None:
+        payload["cross_campaign_memory"] = cross_memory
+        payload["instructions"] = payload["instructions"] + (
+            " The optional `cross_campaign_memory` block is historical advisory "
+            "experience only. Use it only when its match_features are observable "
+            "in the current EvidenceSummary and current action eligibility. It "
+            "cannot override available_families_this_cluster, parent availability, "
+            "evaluation requirements, deterministic safeguards, or current-target "
+            "evidence. Do not use hidden target identity or target-class priors."
+        )
+    if seed_action_families:
+        payload["instructions"] = payload["instructions"] + (
+            " `seed_action_families` are deterministic bootstrap seeds injected "
+            "by the controller to avoid an empty first tick. Treat them as a "
+            "transparent scheduling prior, not as evidence that any family should "
+            "win this target."
+        )
+    # D-feedback (2026-05-26): if the Critic raised flags about the previous
+    # tick's hypotheses, surface them so the LLM can either correct course or
+    # justify continuing. Flags are advisory — they don't block the next
+    # proposal, but ignoring them yields lower self-confidence in our audit.
+    if recent_critic_flags:
+        payload["recent_critic_flags_last_tick"] = list(recent_critic_flags)
+        # §22.8.5 tone-down (2026-05-26 PM): plan §22.3 promised the Critic
+        # is informational audit only. Earlier wording ("Either address each
+        # flag in this tick's claims OR provide a justification") made the
+        # Planner spend slot-budget defending instead of exploring, turning
+        # the Critic into a de-facto soft veto. Reworded to "consider" so
+        # the LLM can weigh the flags against evidence on equal footing.
+        payload["instructions"] = payload["instructions"] + (
+            " The Critic LLM raised the listed flags about your previous "
+            "hypotheses. These are advisory observations, not directives. "
+            "Consider each flag against the current evidence; if a flag is "
+            "well-supported by evidence, reflect it in your reasoning. If "
+            "the evidence has shifted or the flag was speculative, your new "
+            "hypotheses may diverge from it without justification."
+        )
+    # v7_3: prepend a one-line TL;DR so the decision 5-tuple is the FIRST thing
+    # the LLM reads, not buried 75% deep in the sorted JSON (form audit).
+    head = evidence_tldr(evidence)
+    _hyp_line = _hypothesis_outcomes_tldr(active_hypotheses)
+    if _hyp_line:
+        head += "\n" + _hyp_line
+    return head + "\n" + json.dumps(payload, indent=None, sort_keys=True)
+
+========================================================================================
+SUPERVISOR
+========================================================================================
+Usage scope: campaign_llm
+Runtime source: trex/supervisor.py
+Runtime source SHA256: a44c17af46bdbfa2f6783b60e9aaeb5cbb43e65f2594968529f462de65c7eb25
+System prompt SHA256: b50305be21fcf325b490c22165004c8b427e3d9008797e84bbef74f971ca854d
+Module defaults: {"base_url": "http://127.0.0.1:8500/v1", "confidence_threshold": 0.55, "enable_thinking": false, "max_tokens": 3072, "model": "vllm/Qwen/Qwen3.6-27B-FP8", "temperature": 0.0, "timeout_s": 90.0}
+Prompt flow: system instructions -> the same current evidence summary -> active HypothesisCards -> validated ActionCandidates -> current queue and recent-start context -> optional cross-campaign memory -> conditional one-shot ranking repair after a schema error
+
+[SYSTEM PROMPT]
+You are the Supervisor for T-ReX, a budgeted protein-binder design controller.
+
+Given decomposed evidence, active hypotheses, and validated ActionCandidates,
+choose a mode_mixture and rank launchable candidates.
+
+Decision order:
+1. Objective: maximize live Foldseek SU@TM0.6 per live WORKER-WALL GPU-hour
+   from objective_summary. Use completed worker-GPU route values only for exact
+   route/config learning.
+2. Route value: prefer exact route_values rows over family averages. Rank current
+   exploit by gpu_recent_new_su_per_route_gpu_h, then medium_recent_* as a
+   delayed-feedback guard, then safe direct-scored record_recent_*. Lifetime value
+   is memory/context, not current exploit rank.
+3. Strict/near-miss evidence: raw strict is progress only when it creates new
+   Foldseek SU@TM0.6. Duplicate-heavy routes can still be good if they continue
+   buying new SU/GPU-h.
+   A first official SU on a sparse/hard run is rare positive evidence: keep a
+   bounded confirmation launchable, but do not infer mature all-worker value.
+   Among exact routes with reliable, approximately comparable recent SU/GPU-h
+   (the lower rate is at least 85% of the higher rate; treat sparse counts or
+   exposure cautiously), put them in the same primary-efficiency tier and MUST
+   rank higher strict_quality_p25, then strict_quality_median, first. Do not rank
+   the lower-quality route first solely for a marginal rate advantage inside
+   this tier. Quality cannot compensate outside the comparable-efficiency tier.
+   Each candidate may include matched_exact_route_value. This is the exact
+   family/operator/config (and parent-lineage, when applicable) join for that
+   candidate. Use this joined row for candidate-specific efficiency and quality;
+   do not transfer its values to another candidate.
+4. Diagnostics: always inspect diagnostic_driver_tldr, diagnostic_axis_stats, and
+   route_values[*].diagnostic_improvement_score/axes. Diagnostics do not mint SU;
+   use them to choose rescue/explore levers. In productive states they are
+   monitoring/tie-break evidence unless recent new SU/GPU-h decays; in stalled,
+   deep_stall, rescue_rich, or duplicate-collapse states they are primary
+   scientific evidence for rescue/explore ranking.
+   Treat ipTM, ipsae, pTM, interface energetics, contacts, buried surface area,
+   clashes, and verifier agreement as source-scoped Pareto objectives. Prefer a
+   supported lever that improves the current blocker while preserving canonical
+   pLDDT/iPAE/scRMSD. Missing or differently calibrated backend metrics are not
+   negative evidence and must not be compared as if they shared one scale.
+   Diagnostic axes may be source-scoped as axis[src=family]. Do not rank a
+   candidate as if a BoltzGen-only diagnostic failure directly supports a
+   BindCraft/Complexa knob unless the candidate explicitly frames it as an
+   orthogonal cross-family probe rather than same-axis remediation.
+5. Diversity/trust/realization: read diversity_summary as auxiliary collapse and
+   panel evidence, dedup_trust as SU/diversity trust, and execution_realization as
+   selected->started feedback. Selected-but-not-started work is pending execution,
+   not scientific failure and not a reason to submit duplicate probes. A large
+   proposed->started gap with selected approximately equal to started is a ranking
+   outcome, not evidence that the family was blocked or under-tested.
+
+Action hierarchy is a ranking prior, not a ban: L1 material search knobs include
+FK temperature/sc_scale_noise/beam breadth; L2 rescue may be parent-bound
+redesign/refilter on a concrete parent or same-family material perturbation
+around a near-miss/stuck route. Scalar reward-only changes are later levers unless
+backed by axis evidence or paired with material search.
+
+Mode mixture:
+- Emit finite nonnegative exploit/rescue/explore values that SUM TO 1.0.
+- Keep mode_mixture coherent with candidate_decisions. If a rank-1 candidate is
+  intended to launch within the next few worker starts, assign nontrivial mass
+  to its mode; do not rely on the Selector to repair a contradictory scalar.
+- mode_mixture_ranges are advisory target ranges. Minimal safety floors are hard;
+  tighter ranges bind mainly under low confidence or collapse.
+- If state is strict_duplicate_collapse or diversity_summary shows collapse, push
+  explore upward. If a cheap route still buys new SU/GPU-h, keep exploit weight.
+- If dry_since_last_SU >=6 worker-GPU-h, shift some budget to diversifying
+  rescue/explore. >=12 without new SU should not be protected as near-miss
+  progress. If sustained deep_stall recovers with only 1-2 SU on a low-yield run,
+  keep the recovered route but rank at least one non-dominant root-family probe
+  high enough to launch.
+
+Immediate launch priority:
+- Give every candidate_decision a unique global_rank in 1..N. global_rank=1 is
+  the candidate you want on the NEXT available worker across ALL modes; it is
+  authoritative whenever feasible. rank_in_mode remains the ordering within
+  exploit/rescue/explore, while mode_mixture remains the longer-horizon target.
+- Rank by expected NEW trusted Foldseek SU per FULL route worker-GPU-hour,
+  including generation plus canonical score conversion. This is not a
+  shortest-runtime contest: probability of strict success, structural novelty,
+  strict quality, diagnostic evidence, and information value on stalled targets
+  all matter.
+- When a low-cost Complexa or ProteinMPNN route is currently buying comparable or
+  better new SU/GPU-h with adequate quality, rank it ahead of a slower high-cost
+  route. When BindCraft is the only route with replicated current SU or strong
+  canonical-scored signal, it may correctly receive the top global ranks.
+- BindCraft Accepted/Rejected/native metrics are diagnostic evidence only. Use
+  chained canonical AF2 strict/SU outcomes for route value; do not mistake native
+  acceptance for official success or tiny AF2 child cost for total route cost.
+
+Candidate ranking:
+- Rank only candidate_ids present in the input pool.
+- Do not use target identity, target class, or unsupported family priors. If a cross_campaign_memory block is provided, treat it only as advisory historical experience conditioned on current evidence. No family is the expected winner for any target.
+- Direct-scored families can be ranked by direct recent SU/GPU-h. Diagnostic-only
+  families require chained credit or accepted-artifact/diagnostic evidence; do not
+  let recent AF2 score-conversion children make the generator look artificially
+  cheap.
+- canonical_score_conversion refilters are system scoring lanes, not LLM rescue/
+  explore budget. parent_model_refold is advisory only: it writes refold_* and
+  does not mint SU.
+- Do not describe de-novo candidates as parent-scaffold actions when
+  parent_result_id is null. Parent-bound rescue requires a concrete parent family
+  such as structure_refilter, proteinmpnn_redesign.
+- resource_class is an audit/tie-break label, not a backend timeout promise.
+  extended is allowed only when the candidate itself is extended-cost or the
+  hypothesis is supported by at least one routed/refiltered descendant.
+
+Output contract:
+- candidate_decisions must include candidate_id, mode, rank_in_mode, global_rank,
+  resource_class, what, why, evidence_refs, expected_signal, stop_or_downgrade_if,
+  and reasoning_trace.
+- reasoning_trace must include observed_signal, inference, action_implication.
+  Keep each field short; this is an audit trace, not hidden chain-of-thought.
+- Cite provided evidence/hypothesis IDs only.
+- CRITICAL duplicate-candidate rule: each candidate_id must appear in AT MOST ONE mode across the entire candidate_decisions list. If a candidate fits two modes, choose the dominant role. Duplicate IDs
+  across modes cause schema_fail.
+- If allocation cannot be grounded, set abstain=true with fail_reason.
+- Confidence: 0.45-0.55 for sparse/noisy evidence; use
+  0.65-0.75 when direct evidence supports the mixture;
+  >0.75 only when multiple direct signals agree.
+- Output JSON only. No prose outside the JSON object.
+
+[DYNAMIC USER-PROMPT BUILDER]
+def build_user_prompt(
+    evidence: EvidenceSummary,
+    hypotheses: list[HypothesisCard],
+    candidates: list[ActionCandidate],
+    *,
+    selector_context: dict[str, Any] | None = None,
+) -> str:
+    from .fallback import describe_clamp_for_prompt
+    # Supervisor stub-leak fix (2026-05-30): use the SAME curated view as the
+    # Planner (build_evidence_for_prompt) so the Supervisor — the LLM that emits
+    # mode_mixture/resource_class — does NOT receive the route_health/llm_health
+    # stubs (constant "route wide open / LLM perfectly healthy" dicts) that would
+    # anchor it toward over-allocating capacity. This also keeps both LLMs'
+    # evidence views identical, preventing future divergence.
+    from .planner import build_evidence_for_prompt
+    mixture_ranges = describe_clamp_for_prompt(evidence.state_label)
+    payload = {
+        "evidence": build_evidence_for_prompt(evidence),
+        "hypotheses": [_hypothesis_for_prompt(h) for h in hypotheses],
+        "candidates": [_candidate_for_prompt(c, evidence=evidence) for c in candidates],
+        "selector_context": selector_context or {},
+        "mode_mixture_ranges": (
+            f"state={evidence.state_label}: recommended {mixture_ranges}. "
+            "Emit a mode_mixture summing to 1.0 that reflects the evidence; "
+            "these ranges are guidance, while downstream safety clamps enforce "
+            "hard floors/ceilings. NOTE: under mode-collapse (top_bin_share >= 0.50) "
+            "the explore ceiling is automatically RAISED beyond the figure above, "
+            "so REQUEST MORE explore in that case to break the collapse — the clamp will permit it."
+        ),
+        "instructions": (
+            "Return JSON with mode_mixture (summing to 1.0; use "
+            "mode_mixture_ranges as evidence guidance, not a hard cap) and "
+            "candidate_decisions. Rank enough worthwhile candidates to cover "
+            "selector_context.available_slots_now when feasible. Give every "
+            "decision a unique contiguous "
+            "global_rank in 1..N; global_rank=1 is the immediate cross-mode "
+            "next-worker choice. Rank within "
+            "each mode in 1..N where N is the count of decisions you give that mode. "
+            "Each candidate_decision must include a short reasoning_trace "
+            "(observed_signal, inference, action_implication). Skip candidates "
+            "not worth launching this tick. selector_context is read-only: use "
+            "recent_realized_modes as observational launch-history evidence. "
+            "recent_realized_modes and mode_credit are observational history, "
+            "not an instruction to repay stale quota before global_rank=1. Emit "
+            "the desired evidence-driven mode_mixture as the longer-horizon "
+            "policy; global_rank controls fresh immediate launches. "
+            "selector_context.cost_admission lists "
+            "families the controller has yield-DEFERRED and high-cost dispatch "
+            "pressure hints. Treat yield_deferred_families as weak scientific routes "
+            "unless fresh evidence says otherwise. Use selected_not_started and "
+            "dispatch_deferred as execution pressure, and avoid duplicate proposals "
+            "while equivalent work is pending. Do not reinterpret proposals that the "
+            "Selector did not choose as blocked execution or scientific under-testing. "
+            "If method_health is not clearly negative, one bounded ranked probe may be "
+            "reasonable; if another route is already producing high new SU/GPU-h and "
+            "diversity is healthy, prefer that efficient route instead."
+        ),
+    }
+    cross_memory = cross_campaign_memory_for_prompt()
+    if cross_memory is not None:
+        payload["cross_campaign_memory"] = cross_memory
+        payload["instructions"] = payload["instructions"] + (
+            " The optional `cross_campaign_memory` block is historical advisory "
+            "experience only. Use it only when its match_features are observable "
+            "in the current EvidenceSummary, active hypotheses, candidate pool, "
+            "and selector context. It cannot override candidate feasibility, "
+            "parent availability, evaluation requirements, deterministic safeguards, "
+            "or current-target evidence."
+        )
+    # v7_3: prepend the TL;DR digest and mixture guidance so the evidence
+    # summary and clamp context are the FIRST things read, instead of being
+    # buried after the full evidence dump.
+    from .planner import evidence_tldr
+    header = (
+        evidence_tldr(evidence)
+        + "\nMIXTURE GUIDANCE: " + payload["mode_mixture_ranges"]
+    )
+    return header + "\n" + json.dumps(payload, sort_keys=True)
+
+[CONDITIONAL RANKING-REPAIR BUILDER]
+def build_ranking_repair_prompt(
+    validation_error: str,
+    candidate_ids: set[str],
+) -> str:
+    """Build the bounded one-shot schema-repair message."""
+
+    ordered_ids = sorted(candidate_ids)
+    candidate_hint = ", ".join(ordered_ids[:40])
+    if len(ordered_ids) > 40:
+        candidate_hint += ", ..."
+    return (
+        "Your previous output rejected: " + validation_error + ". "
+        "Re-emit the JSON. Ensure each candidate_id appears in exactly ONE "
+        "mode and give every candidate_decision one unique contiguous "
+        "global_rank in 1..N, where 1 is the immediate next-worker choice. "
+        "Use only these candidate_id values: " + candidate_hint + "."
+    )
+
+========================================================================================
+CRITIC
+========================================================================================
+Usage scope: standalone_optional_llm
+Runtime source: trex/critic.py
+Runtime source SHA256: 401be93d51ee1da1516947e73d39338fe5db7e77374cc4798a9b6b1289eca9d9
+System prompt SHA256: 25a22d747e7d82c916cd73a39e0be6bcd2782d02aca7214e8a803114841d62f0
+Module defaults: {"base_url": "http://127.0.0.1:8500/v1", "enable_thinking": false, "enabled": false, "max_tokens": 256, "model": "vllm/Qwen/Qwen3.6-27B-FP8", "temperature": 0.3, "timeout_s": 30.0}
+Prompt flow: system instructions -> current evidence summary -> Planner recommendation -> flag-only audit response
+
+[SYSTEM PROMPT]
+You are a critic reviewing a Planner's recommendation. Flag ONLY if you can identify SPECIFIC, EVIDENCE-CITED issues. Do not invent target characteristics you don't have evidence for.
+
+Categories (flag ONLY with specific evidence):
+  (a) Target-prior contradicted by evidence: ONLY flag if evidence.recipes contains strict_success entries from a family DIFFERENT from the Planner's choice AND those successes are RECENT (last 3 ticks). Do NOT speculate about whether the target 'should' prefer a family you cannot verify from evidence.
+  (b) Deadline violation: cite remaining_wall_h vs expected method runtime.
+  (c) Ignored recent failure: cite the matching joint_fail recipe.
+  (d) Default-bias: ONLY flag if the SAME family was proposed in the last 3 ticks across 3+ different target_classes with no rationale shift.
+
+If you cannot identify a SPECIFIC issue cited from the evidence above, respond 'no_flags'. Novel targets, exploratory probes, and reasoned first-attempts are NOT issues. When in doubt, do not flag.
+
+[DYNAMIC USER-PROMPT BUILDER]
+def build_critic_user_prompt(
+    evidence: EvidenceSummary,
+    planner_output: Any,
+) -> str:
+    """Build the exact user message sent to the publication critic."""
+
+    payload = build_critic_payload(evidence, planner_output)
+    return (
+        "Review the Planner's recommendation against the evidence. "
+        "Flag specific, evidence-cited issues per the categories above, or "
+        "'no_flags'.\n\n"
+        + json.dumps(payload, default=str, indent=2)
+    )
+
+[CRITIC PAYLOAD BUILDER]
+def build_critic_payload(
+    evidence: EvidenceSummary,
+    planner_output: Any,  # PlannerOutput; avoid circular import
+) -> dict:
+    """Compact review payload the Supervisor/critic sees.
+
+    v7_3: diagnostics are surfaced with the SAME pass/near/fail granularity as the
+    strict axis_stats, PLUS the two-tier `below_accept`/`quality_threshold`, the
+    alt-model advisory medians, and the per-design `diagnostic_blocking_axis` of
+    the exemplars — so the Supervisor can see every intermediate metric the Planner
+    saw (previously it got only {pass, median} for diagnostics and nothing on the
+    alt-model block or per-design diagnostic blockers). Strict success/SU are
+    untouched; this only widens what the critic can review.
+    """
+    alt = getattr(evidence, "diagnostic_alt_model_scores", None) or {}
+    return {
+        "target_id": evidence.target_id,
+        "target_class": getattr(evidence, "target_class", None),
+        "remaining_wall_h": evidence.remaining_wall_h,
+        "state_label": evidence.state_label,
+        "axis_stats": {k: {"pass": v.pass_count, "near_pass": v.near_pass_count,
+                             "fail": v.fail_count, "median": v.median_raw}
+                         for k, v in evidence.axis_stats.items()},
+        "diagnostic_axis_stats": {k: {
+            "pass": v.pass_count, "near_pass": v.near_pass_count,
+            "fail": v.fail_count, "below_accept": v.below_accept_count,
+            "median": v.median_raw, "quality_threshold": v.quality_threshold,
+            "pass_threshold": v.pass_threshold,
+        } for k, v in evidence.diagnostic_axis_stats.items()},
+        "diagnostic_alt_model_scores": {
+            fam: {sk: sv.get("median") for sk, sv in scores.items()}
+            for fam, scores in alt.items()
+        },
+        "exemplar_diagnostic_blockers": [
+            {"result_id": e.result_id, "kind": e.kind, "family": e.family,
+             "diagnostic_blocking_axis": e.diagnostic_blocking_axis}
+            for e in (getattr(evidence, "exemplars", None) or [])
+            if e.diagnostic_blocking_axis
+        ][:6],
+        "recipes": [{
+            "family": r.method_family, "class": r.recipe_class,
+            "config_delta": r.config_delta, "recency_tick": r.recency_tick,
+            "descendant_count": r.descendant_count,
+        } for r in evidence.recipes[:8]],
+        "planner_proposal": {
+            "valid": planner_output.valid,
+            "abstain": planner_output.abstain,
+            "rationale": (planner_output.rationale or "")[:500],
+            "cards": [{
+                "claim": (c.claim or "")[:300],
+                "mode_affinity": c.mode_affinity,
+                "recommended_action_families": c.recommended_action_families,
+            } for c in (planner_output.cards or [])[:4]],
+        },
+    }

@@ -1,0 +1,15 @@
+include README.md
+include LICENSE
+include CITATION.cff
+include CONTRIBUTING.md
+include .env.example
+recursive-include benchmarks *.csv *.json *.md *.py
+recursive-include config *.json *.txt
+recursive-include docs *.md *.py *.txt
+recursive-include examples *
+recursive-include external *.md *.patch
+recursive-include scripts *.py *.sh
+recursive-include slurm *.slurm
+global-exclude *.py[cod]
+global-exclude __pycache__
+recursive-include trex/tests *.py

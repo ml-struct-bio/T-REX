@@ -1,0 +1,14 @@
+{
+  "target_id": "38_TNFalpha_REPACK",
+  "target_class": "cytokine_trimer",
+  "hotspots": [
+    "A113",
+    "C73"
+  ],
+  "chain_ids": [
+    "A",
+    "B",
+    "C"
+  ],
+  "panel_size_K": 8
+}

@@ -1,0 +1,50 @@
+schema_version: trex.campaign.v1
+name: cd45-example
+target:
+  name: cd45
+  asset_root: /path/to/target-assets
+  constraint: null
+  pdb: null
+run:
+  archive_root: ./runs/cd45-example
+  max_wall_hours: 48.0
+  seed: 0
+  worker_gpus: ['1', '2', '3']
+  enabled_families:
+  - bindcraft
+  - boltzgen
+  - complexa_beam
+  - complexa_best_of_n
+  - complexa_fk_steering
+  - complexa_mcts
+  - proteinmpnn_redesign
+  - structure_refilter
+llm:
+  base_url: http://127.0.0.1:12000/v1
+  model: vllm/Qwen/Qwen3.6-27B-FP8
+memory:
+  cross_campaign_path: null
+policy:
+  critic: true
+  evidence_skip: false
+  exemplars: true
+  foldseek_su_tm_score: 0.6
+  foldseek_collapse_tm_score: 0.6
+  selector_quota_realization: fractional_carry
+  selector_mode_window_k: 1
+  selector_adaptive_mode_window_k: false
+backends:
+  repo_root: ..
+  external_root: /path/to/external
+  complexa_repo: /path/to/Proteina-Complexa
+  legacy_complexa_repo: /path/to/Proteina-Complexa-community
+  complexa_python: /path/to/Proteina-Complexa/.venv/bin/python
+  bindcraft_repo: /path/to/BindCraft
+  bindcraft_env: /path/to/BindCraft/environment
+  boltzgen_repo: /path/to/BoltzGen
+  boltzgen_binary: /path/to/BoltzGen/.venv/bin/boltzgen
+  boltzgen_cache: /path/to/BoltzGen/checkpoints
+  foldseek_binary: /path/to/foldseek
+  mmseqs_binary: /path/to/mmseqs
+  qwen_model_path: /path/to/Qwen3.6-27B-FP8
+  qwen_model_manifest: ../config/trex/qwen3_6_27b_fp8_model_manifest.json

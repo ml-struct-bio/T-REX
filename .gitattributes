@@ -1,0 +1,2 @@
+# Preserve third-party patch bytes exactly; their SHA256 is part of provenance.
+external/patches/*.patch -whitespace

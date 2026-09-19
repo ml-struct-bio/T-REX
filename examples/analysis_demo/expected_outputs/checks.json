@@ -1,0 +1,10 @@
+{
+  "archive_valid": true,
+  "result_count": 2,
+  "qualified_fixture_count": 1,
+  "foldseek_status": "not_run",
+  "throughput": null,
+  "trace_count": 1,
+  "exported_result_ids": ["demo_qualified"],
+  "copied_pdb_count": 1
+}

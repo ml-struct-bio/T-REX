@@ -1,0 +1,89 @@
+{
+  "content_sha256": "2ce0664041f82ce7fdbbaa523696327e0895465210d066c8bdfd4ed19e4732b0",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+      "size": 18657
+    },
+    {
+      "path": "params_model_1.npz",
+      "sha256": "f95e453e6a290ddf317ba1c9698d53fa110cf007ea979b0eae43e6ad38b4e364",
+      "size": 373069562
+    },
+    {
+      "path": "params_model_1_multimer_v3.npz",
+      "sha256": "611da8fc7478928f68de12e8b226260ef1f4ce62bcc29b008572e52f4f212959",
+      "size": 373043148
+    },
+    {
+      "path": "params_model_1_ptm.npz",
+      "sha256": "5e564f79af5bcd54ccef6e2a6bb0ff01015d01650ebc41d4575e35f0de9ecc84",
+      "size": 373103340
+    },
+    {
+      "path": "params_model_2.npz",
+      "sha256": "4da37ed3b71f08d935f913dfab0133977cd0d76ad37cd9333ff294d7fae43f87",
+      "size": 373069562
+    },
+    {
+      "path": "params_model_2_multimer_v3.npz",
+      "sha256": "51362b0844382ae0f5720c59b81dd13a43eea40fbf9995dd2573bdab88865378",
+      "size": 373043148
+    },
+    {
+      "path": "params_model_2_ptm.npz",
+      "sha256": "23645d9a82c4af2ed54cd48a7b3c1c2575dc6aa9fe931adb4d7203ca5f0dc398",
+      "size": 373103340
+    },
+    {
+      "path": "params_model_3.npz",
+      "sha256": "3cc4584dc0b0d1bdd1f7af14bd0692d00df3aa0e738d0d1b314821ad7eee4ffe",
+      "size": 371712506
+    },
+    {
+      "path": "params_model_3_multimer_v3.npz",
+      "sha256": "46d9bcad288edc7ad5a6362ee8e5f84307a69712e00e6c36b1ef9daf96ebc9ce",
+      "size": 373043148
+    },
+    {
+      "path": "params_model_3_ptm.npz",
+      "sha256": "b53a724294cdd46a45d530b306bced8e429ffee74a4f9a2a897551b30966c415",
+      "size": 371746284
+    },
+    {
+      "path": "params_model_4.npz",
+      "sha256": "b0a78b7e18661abc6097a905f48505004e6e3993c5dc41fb6820acf56e9c1d12",
+      "size": 371712506
+    },
+    {
+      "path": "params_model_4_multimer_v3.npz",
+      "sha256": "59bdabd2d69c07fe26b37882d544acbd1b9f89f196828f4220da49e0610b572c",
+      "size": 373043148
+    },
+    {
+      "path": "params_model_4_ptm.npz",
+      "sha256": "07d0e285ad1406ce3d91a2f6633a8ce9ee99155a53d24ee7783f8fd1e89f5d3a",
+      "size": 371746284
+    },
+    {
+      "path": "params_model_5.npz",
+      "sha256": "5d261ec6e18ba87784541f5ce113570018b3338df61ae577661b6232358d47e7",
+      "size": 371712506
+    },
+    {
+      "path": "params_model_5_multimer_v3.npz",
+      "sha256": "917742be5a105d6b80f13f1f13f20459f27ec3fdcd34ea088b359f4502d6177f",
+      "size": 373043148
+    },
+    {
+      "path": "params_model_5_ptm.npz",
+      "sha256": "2f8d0bd193e7d6e837958ba92acdc3f02b23b61bf841fa043fc076ee0e1996a5",
+      "size": 371746284
+    }
+  ],
+  "model_name": "AF2",
+  "n_files": 16,
+  "schema_version": "v7.3.3_model_manifest_v1",
+  "total_bytes": 5587956571
+}

@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+build/
+dist/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Runtime data and large scientific assets
+/results/
+/analysis/
+runs/
+archives/
+outputs/
+slurm_logs/
+external/*
+!external/README.md
+!external/patches/
+!external/patches/*.patch
+models/
+weights/
+checkpoints/
+*.pdb
+*.cif
+*.mmcif
+*.a3m
+*.npz
+*.pt
+*.pth
+*.safetensors
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*~
+
+# Synthetic CPU example and local output
+!examples/analysis_demo/toy.pdb
+/demo-output/
+/demo-export/
