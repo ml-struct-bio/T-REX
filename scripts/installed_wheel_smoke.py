@@ -113,6 +113,9 @@ def main(argv: list[str] | None = None) -> int:
             f"{imported_package}"
         )
 
+    if (imported_package.parent / "tests").exists():
+        raise RuntimeError("wheel unexpectedly includes development tests")
+
     commands = (
         "trex",
         "trex-analyze",

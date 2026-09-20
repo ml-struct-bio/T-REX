@@ -58,6 +58,10 @@ trex-panel = "trex.finalize_panel:main"
 trex-target = "trex.targets:main"
 trex-backend = "trex.scaffold:main"
 
+# Include only declared runtime resources in wheels; retain tests in the sdist.
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["trex*"]
