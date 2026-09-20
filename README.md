@@ -17,12 +17,12 @@ Use Python 3.10–3.12. From this repository:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install .
+python -m pip install -e .
 python -m pip check
 trex --help
 ```
 
-This installs the controller and analysis commands. A real campaign also needs
+This links the controller and analysis commands to your checkout. A real campaign needs
 GPU resources, external scientific backends, target structures and a configured
 LLM endpoint. Follow the [installation guide](docs/installation.md) to prepare
 those dependencies. Developer tests are described [separately](docs/development.md).

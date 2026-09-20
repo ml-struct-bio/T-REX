@@ -75,3 +75,9 @@ Until that DOI is filled, the numerical endpoint/source-table audit is public
 and deterministic, but an external user cannot reconstruct every post-hoc
 molecular analysis from raw structures. The README labels this boundary
 explicitly.
+
+## LLM validation
+
+The [LLM validation benchmarks](../benchmarks/llm_validation/README.md) contain
+synthetic Planner/Supervisor output checks and Supervisor repeatability tools.
+They are separate from molecular campaigns and frozen endpoint-table audits.

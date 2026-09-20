@@ -1,6 +1,6 @@
 # CPU archive-analysis example
 
-From the repository root, after `python -m pip install .`:
+From the repository root, after `python -m pip install -e .`:
 
 ```bash
 python examples/analysis_demo/run_demo.py --out ./demo-output

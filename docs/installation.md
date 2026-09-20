@@ -7,10 +7,15 @@ Use Python 3.10, 3.11 or 3.12. From a downloaded or cloned T-REX repository:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install .
+python -m pip install -e .
 python -m pip check
 trex --help
 ```
+
+The editable install links commands to this checkout, keeping executed source
+identity consistent with `backends.repo_root`. Keep the checkout in place.
+A regular wheel install also supports archive analysis; use the checkout install
+for the campaign and Slurm instructions in this guide.
 
 This installs the controller and archive-analysis commands. It does not install
 scientific backends, model weights or vLLM. Try the
