@@ -80,9 +80,8 @@ def index_actions_by_spawned_result(
 ) -> dict[str, ActionCandidate]:
     """Map result IDs to their immediate archived candidate parent.
 
-    V6.3-migrated archives have no ``ActionCandidate`` records. Those archives
-    intentionally produce an empty mapping so the evidence reducer can fall
-    back to family-level recipe signatures.
+    Archives without ActionCandidate records produce an empty mapping, allowing
+    the reducer to use family-level recipe signatures.
     """
 
     action_by_candidate_id = {

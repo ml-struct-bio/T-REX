@@ -98,7 +98,6 @@ def test_cold_start_ignores_llm_non_warmstart_until_evidence_exists():
     assert "proteinmpnn_redesign" not in fams
 
 
-
 def test_warmstart_skipped_when_recipes_exist():
     """If the archive has any recipe (success or failure), warmstart is
     skipped — the Planner should drive from real evidence instead."""
@@ -440,12 +439,9 @@ def test_evidence_fallback_does_not_override_feasible_generator_card():
 
 
 def test_evidence_fallback_fires_with_recipes_when_llm_empty():
-    """Bug fix (2026-05-28): a target normally REACHES `stalled` via joint_fail
-    recipes, so the old top-level `if evidence.recipes: return []` made the
-    stalled-escape unreachable in the exact deadlock case it was built for
-    (stalled + empty LLM output + recipes → 0 launches). With no LLM
-    hypotheses, the explore-leaning fallback must still fire even with recipes
-    present."""
+    """Stalled fallback remains available when archived recipes exist but no usable LLM
+    hypothesis does.
+    """
     e = _evidence("stalled", recipes=[_joint_fail_recipe()])
     cands = build_candidates([], e)
     assert any(c.candidate_id.startswith("evidence_fallback") for c in cands)
@@ -472,7 +468,6 @@ def test_cold_low_evidence_warmstart_preempts_llm_hypotheses():
     fams = {c.method_family for c in cands}
     assert "complexa_beam" in fams           # from warmstart
     assert "proteinmpnn_redesign" not in fams    # LLM resumes after evidence exists
-
 
 
 def _diag_backlog(fam: str, *, accepted: int, unscored: int, completed: int) -> dict:

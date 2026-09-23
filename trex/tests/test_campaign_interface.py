@@ -114,7 +114,7 @@ def test_diagnostic_family_makes_canonical_scoring_explicit(tmp_path: Path) -> N
     campaign = load_campaign(_campaign_file(tmp_path, families=["bindcraft"]))
 
     assert campaign.effective_families == ("bindcraft", "structure_refilter")
-    assert "canonical AF2 scoring" in campaign.resolution_notes[0]
+    assert any("canonical AF2 scoring" in note for note in campaign.resolution_notes)
 
 
 def test_unknown_config_key_fails_with_location(tmp_path: Path) -> None:

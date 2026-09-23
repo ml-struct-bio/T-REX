@@ -1,19 +1,7 @@
-"""Capability registry: which (family, operator, lane) tuples are
-launchable in this environment.
+"""Registered action families, supported settings, resource classes, and availability.
 
-The registry is the SOLE source of truth for what the
-CandidateBuilder + Selector are allowed to emit. It maps each backend
-family to:
-  - a default operator id / lane id
-  - a resource cost class
-  - a preflight check (callable or shell command)
-  - a runtime bucket id (when known)
-  - an availability status: `available`, `degraded`, `unavailable`, or
-    `legacy_archive_only`
-
-In MVP, preflight is `Capability.preflight_status` which is set at run
-startup by the operator. The registry does NOT auto-run preflight per
-tick.
+Candidate construction and selection share this registry. Preflight is performed at
+campaign setup rather than on every planning cycle.
 """
 
 from __future__ import annotations
@@ -43,20 +31,10 @@ class Capability:
     # Optional preflight callable; returns (ok: bool, message: str).
     # Not invoked at registration; operator runs it once per run.
     preflight: Callable[[], tuple[bool, str]] | None = None
-    # Gap A: parameter-space novelty. Each key is a config_delta path the
-    # Planner may suggest values for. Numeric → (lo, hi) range; categorical
-    # → list of allowed values. Verifier rejects suggestions outside this
-    # whitelist.
+    # Allowed numeric ranges and categorical settings for each family.
     allowed_params: dict[str, ParamRange] = field(default_factory=dict)
-    # fix20 (2026-05-26): typed metadata for adaptive-route Planner reasoning.
-    # The prompt renders the role table from these fields (no hard-coded list),
-    # and the Selector/Feasibility uses them deterministically:
-    #   role                       — high-level capability class
-    #   requires_parent_pdb        — feasibility-time precondition; controller
-    #                                pre-checks archive before scheduling
-    #   outputs_diagnostic_only    — scoring is not AF2-calibrated, so a
-    #                                chain through `structure_refilter` is
-    #                                needed to enter the strict_success path
+    # Registry metadata supplies prompt roles and deterministic feasibility checks.
+    # Diagnostic-only outputs require standardized evaluation before qualification.
     role: FamilyRole = "generator"
     requires_parent_pdb: bool = False
     outputs_diagnostic_only: bool = False
@@ -65,11 +43,9 @@ class Capability:
 def validate_config_delta(
     capability: "Capability", config_delta: dict[str, object]
 ) -> tuple[bool, list[str]]:
-    """Return (ok, reasons). reasons is empty when ok=True.
+    """Validate parameter ranges, allowed values, and the per-job evaluation budget.
 
-    Two layers of validation (Category A guardrail — bug/budget):
-      (1) per-param range/enum check (V2 Gap A)
-      (2) eval-budget cap (V5/V6.3 lineage — see compute_eval_budget docstring)
+    Return (ok, reasons), with an empty reasons list when all checks pass.
     """
     reasons: list[str] = []
     for k, v in (config_delta or {}).items():
@@ -106,22 +82,11 @@ def validate_config_delta(
 def validate_config_delta_partial(
     capability: "Capability", config_delta: dict[str, object]
 ) -> tuple[dict[str, object], list[str]]:
-    """Return (filtered_delta, dropped_reasons).
+    """Return validated settings and reasons for rejected settings.
 
-    B-010 fix (2026-05-26): The strict `validate_config_delta` dropped the
-    ENTIRE config_delta on any single invalid key. In practice the LLM often
-    proposes a mix of valid (`temperature=0.05`) and invalid
-    (`steering_weight=8.0`) keys per family — strict-all dropped them all and
-    every Complexa launch ended up running with default config regardless of
-    the LLM's reasoning.
-
-    This partial variant keeps the valid keys, clamps numeric overshoots to the
-    nearest allowed bound, drops only invalid categorical/unknown keys, and
-    re-runs the eval-budget guardrail against the filtered set. If the eval
-    budget is exceeded by the FILTERED set, the budget-driving knobs are
-    deterministically repaired down to the family cap. If repair is impossible,
-    the whole delta is rejected with an explicit reason. It must never silently
-    convert an intended config to defaults.
+    Clamp numeric overshoots, drop unknown or invalid categorical settings, and repair
+    the evaluation budget if possible. Reject unrepairable settings explicitly rather
+    than silently substituting defaults.
     """
     kept: dict[str, object] = {}
     dropped: list[str] = []
@@ -172,15 +137,7 @@ def validate_config_delta_partial(
 def family_params_schema_for_prompt(
     registry: "CapabilityRegistry", families: list[str] | None = None
 ) -> dict[str, dict[str, object]]:
-    """Serialize allowed_params for the planner prompt.
-
-    Returns a dict {family: {param: [lo, hi] or [...allowed...]}}. Tuples are
-    converted to lists for JSON-safety. B-010 fix: previously the planner
-    prompt referenced `allowed_params_per_family` as if it would be injected
-    into the evidence, but no caller actually injected it — the LLM was left
-    hallucinating param names like `num_outputs`, `steering_weight`, `c_puct`
-    that don't exist in any family's allowed_params.
-    """
+    """Serialize allowed parameters as JSON-safe family-to-parameter mappings."""
     out: dict[str, dict[str, object]] = {}
     keys = families if families is not None else list(registry.capabilities.keys())
     for fam in keys:
@@ -199,33 +156,15 @@ def family_params_schema_for_prompt(
     return out
 
 
-# ---------------------------------------------------------------------------
-# Per-launch eval-budget cap (V5/V6.3 lineage)
-# ---------------------------------------------------------------------------
+# Per-job evaluation-budget limits.
 
-# Default per-launch eval cap (forward-pass count through the simulator).
-# Reference points (from V5/V6.3 archives):
-#   - V5 CD45 standard: nsteps=400 × nsamples=4 × bw=4 × n_branch=4 = 25,600
-#   - V6.3 typical:     nsteps=300 × nsamples=4 × bw=6 × n_branch=4 = 28,800
-#   - V5 SC2RBD beam_then_hallucinate (job 8294854): ~32,000 evals total
-# Default cap: 32,768. Rejects gigantic configs like nsteps=500 × bw=32
-# × n_branch=16 × nsamples=8 = 2,048,000 evals (OOM-risk).
+# Per-launch evaluation caps bound search expansion.
 DEFAULT_EVAL_BUDGET_CAP: int = 32_768
 
-# Per-family cap overrides. External generators are budgeted by trajectories
-# / num_designs / num_samples instead of search expansion.
+# Per-family limits use workload settings, not measured GPU time.
+# BindCraft counts requested native accepted designs; BoltzGen uses designs × budget.
 EVAL_BUDGET_CAP_PER_FAMILY: dict[str, int] = {
-    # Complexa family - search expansion. B-012 fix (2026-05-26): removed
-    # two unsupported legacy aliases. Complexa instantiate_search only knows
-    # the implemented algorithms (single-pass, best-of-n, beam-search,
-    # fk-steering, mcts). The aliases were exposed via Hydra overrides but
-    # the dispatcher would ValueError on them; an earlier B-011 typo masked
-    # the failure so launches silently fell back to YAML default (best-of-n).
-    # The executor ALWAYS ran 400 steps when nsteps was omitted, so the TRUE per-launch
-    # budget was already 2x what the old 200-step accounting reported — i.e. the real
-    # ceiling these caps permitted was effectively 2x. Doubling the caps alongside the
-    # honest 400-step default PRESERVES the same set of allowed width configs (e.g.
-    # beam_width=8,n_branch=4 still passes) rather than silently tightening it.
+    # Evaluation budgets include search expansion and the executor default step count.
     "complexa_beam":            65_536,
     "complexa_best_of_n":       65_536,
     "complexa_fk_steering":     65_536,
@@ -234,18 +173,13 @@ EVAL_BUDGET_CAP_PER_FAMILY: dict[str, int] = {
     "proteinmpnn_redesign":     2_048,   # num_seq_per_target
     # Refilters (low cost)
     "structure_refilter":       1_024,
-    # External generators — budgeted by max_trajectories / num_designs
-    "bindcraft":                64,      # max_trajectories cap (1 traj ≈ 1-2 GPU-h)
+    # External generators use their native workload settings.
+    "bindcraft":                64,      # requested native accepted designs; not attempted trajectories
     "boltzgen":                 256,     # num_designs × budget cap
 }
 
 
-# llm-002 (2026-06-18): nsteps default is 400, matching the EXECUTOR's behavior when
-# nsteps is omitted (the YAML step_checkpoints default [0,100,200,300,400] = 400
-# steps; controller._build_complexa_overrides). The old 200 here made
-# compute_eval_budget under-count an omitted-nsteps launch by 2x, so the LLM's budget
-# reasoning (defaults_when_key_omitted / default_budget in the prompt) disagreed with
-# what actually ran. Default complexa_beam budget = 400*4*4*4 = 25600 < cap 65536.
+# Match the executor default when nsteps is omitted.
 EVAL_BUDGET_DEFAULTS_PER_FAMILY: dict[str, dict[str, int]] = {
     "complexa_beam": {"nsteps": 400, "nsamples": 4, "beam_width": 4, "n_branch": 4},
     "complexa_fk_steering": {"nsteps": 400, "nsamples": 4, "beam_width": 4, "n_branch": 4},
@@ -361,14 +295,8 @@ def repair_config_delta_to_budget(
 
     repaired = dict(config_delta)
     changes: list[str] = []
-    # llm-002 (2026-06-18): shrink WIDTH/parallelism knobs before DEPTH (nsteps), and
-    # only shrink knobs the LLM EXPLICITLY set. The old loop iterated dict-insertion
-    # order (nsteps FIRST), so an over-asked beam_width/n_branch was preserved while
-    # diffusion DEPTH was cut — and nsteps was even INJECTED below its default for
-    # configs that never set it (a silent 400->100 depth cut) → shallow searches that
-    # convert fewer strict SU per GPU-h. Now: (a) never inject/lower an omitted knob,
-    # (b) reduce width knobs first and nsteps last, (c) clamp nsteps no lower than its
-    # family default (cutting denoising depth hurts fidelity more than trimming width).
+    # Reduce explicitly supplied width settings before depth. Never inject an omitted
+    # setting or lower nsteps below its family default.
     _DEPTH_KEYS = {"nsteps"}
     shrink_order = sorted(
         (k for k in keys if k in config_delta),  # only knobs the LLM explicitly set
@@ -474,29 +402,16 @@ class CapabilityRegistry:
 def default_registry(
     *,
     runtime_bucket_id: str = "rb_v7_mvp_default",
-    # BoltzDesign1 removed entirely (2026-05-29): the user decided to stop
-    # using it. Its integration (executor/parser/registry params) was deleted.
     available_external: tuple[str, ...] = (
         "bindcraft",
         "boltzgen",
     ),
     unavailable: tuple[str, ...] = (),
 ) -> CapabilityRegistry:
-    """Construct the T-ReX MVP capability registry.
-
-    Local Complexa-family + refilters are always `available`. External
-    generators default to `available` (caller can degrade them after
-    preflight). AlphaFold3 was removed entirely (2026-05-26) — weights not
-    available, folder pruned from subgit, family deregistered from T-ReX.
+    """Construct the capability registry; callers can mark backends unavailable after
+    preflight.
     """
-    # Per-family allowed_params: numeric (lo, hi) ranges or categorical lists.
-    # Used by Gap A (parameter-space novelty). Ranges drawn from V5/V6.3 sweeps
-    # and the Proteina-Complexa `binder_generate.yaml` search defaults.
-    #
-    # Complexa exposes 7 search algorithms. T-ReX surfaces them as separate
-    # families so the Planner can compare them at the family level instead
-    # of an LLM-chosen enum. The shared params (beam_width, n_branch,
-    # nsamples, nsteps, batch_size) are repeated where relevant.
+    # Allowed settings for the four supported Complexa search families.
     COMPLEXA_REWARD_PARAMS = {
         "reward_i_pae_weight": (-2.0, 0.0),
         "reward_plddt_weight": (0.0, 2.0),
@@ -509,24 +424,13 @@ def default_registry(
     }
 
     LOCAL_PARAMS = {
-        "complexa_beam": {                 # search.algorithm = beam-search
-            # B-020 fix (2026-05-26): removed `keep_lookahead_samples` —
-            # it was in the registry but never dispatched to Hydra by
-            # _exec_complexa, so any LLM proposal of this key would survive
-            # the partial validator and then silently no-op at the worker.
+        "complexa_beam": {
             "beam_width": (2.0, 16.0),
             "n_branch": (2.0, 8.0),
             "nsamples": (1.0, 8.0),
             "nsteps": (100.0, 500.0),
             "batch_size": (1.0, 16.0),
-            # E-001 expansion (2026-05-26): V5 exposed these refinement +
-            # noise knobs as separate strategy templates (`backbone_noise_beam`,
-            # `beam_then_hallucination`, `hallucination_heavy_beam`). T-ReX
-            # collapses them into LLM-controllable knobs so the planner can
-            # propose `backbone_noise` rescues and `sequence_hallucination`
-            # refinement combinations without needing a separate family per
-            # combination. Backbone-noise range matches V5's calibrated band
-            # (0.10 default → 0.45 strong-noise rescue).
+            # Expose refinement and noise settings within the same search family.
             "sc_scale_noise": (0.05, 0.50),
             "refinement_algorithm": ["", "sequence_hallucination"],
             "n_greedy_iters": (0.0, 30.0),
@@ -538,10 +442,6 @@ def default_registry(
             "filter_samples_limit": (1.0, 1000.0),
             **COMPLEXA_REWARD_PARAMS,
         },
-        # B-012 fix (2026-05-26): unsupported legacy Complexa aliases
-        # removed — Complexa's search_factory only knows 5 algorithms and these
-        # two were never implemented. Stochastic-style exploration is achieved
-        # via complexa_fk_steering.temperature (low-temp) or via seed variation.
         "complexa_best_of_n": {            # search.algorithm = best-of-n
             "replicas": (1.0, 8.0),
             "nsamples": (1.0, 16.0),
@@ -561,10 +461,6 @@ def default_registry(
             "temperature": (0.05, 0.50),   # tighter band than stochastic beam
             "nsamples": (1.0, 8.0),
             "nsteps": (100.0, 500.0),
-            # BUG-A2 fix (2026-05-26): batch_size is dispatched by both
-            # _exec_complexa and _exec_complexa_async for every algorithm
-            # but was missing from fk_steering and mcts registries — LLM
-            # batch_size proposals were silently dropped at validation.
             "batch_size": (1.0, 16.0),
             "sc_scale_noise": (0.05, 0.50),
             "refinement_algorithm": ["", "sequence_hallucination"],
@@ -579,8 +475,8 @@ def default_registry(
             "exploration_prob": (0.10, 0.80),
             "exploration_constant": (0.50, 2.0),
             "nsteps": (100.0, 500.0),
-            "nsamples": (1.0, 8.0),  # added 2026-05-26 for budget consistency
-            "batch_size": (1.0, 16.0),  # BUG-A2 fix (see fk_steering note)
+            "nsamples": (1.0, 8.0),
+            "batch_size": (1.0, 16.0),
             "sc_scale_noise": (0.05, 0.50),
             "refinement_algorithm": ["", "sequence_hallucination"],
             "n_greedy_iters": (0.0, 30.0),
@@ -589,11 +485,7 @@ def default_registry(
             "filter_samples_limit": (1.0, 1000.0),
             **COMPLEXA_REWARD_PARAMS,
         },
-        # HIGH 1 fix (2026-05-26): registry keys MUST match executor cd.get keys
-        # in controller.py exactly. Same pattern as B-010/B-020 — when
-        # the LLM proposes a key the executor doesn't read, validation accepts
-        # it (it's in the registry) but the worker silently uses defaults. This
-        # made LLM control of Phase 2 backends a no-op for 4 of 5 families.
+        # Registry keys must match settings consumed by the backend adapters.
         "proteinmpnn_redesign": {
             "num_seq_per_target": (1.0, 32.0),
             "sampling_temp": (0.05, 0.50),
@@ -623,21 +515,12 @@ def default_registry(
     }
     EXTERNAL_PARAMS = {
         "bindcraft": {
-            # Min 2 (smaller = no useful signal even for stalled-fallback bounded
-            # probe per smoke 8736558 calibration: 0.58 traj/h ⇒ tj=2 ≈ 3-4 h).
-            # Max 64: pairs with EVAL_BUDGET_CAP_PER_FAMILY['bindcraft']=64.
-            # §7.0 stalled-fallback uses 4 (bounded probe);
-            # productive/rescue can scale up to 16-32 with promotion.
+            # The upper trajectory bound matches the family evaluation-budget cap.
             "max_trajectories": (2.0, 64.0),
             "target_length_min": (40.0, 120.0),
             "target_length_max": (60.0, 200.0),
-            # E-002 expansion (2026-05-26): high-value BindCraft advanced
-            # settings that V5 hardcoded but T-ReX surfaces as LLM knobs.
-            # See subgit/BindCraft/settings_advanced/default_4stage_multimer
-            # _mpnn_hardtarget.json for the underlying defaults that T-ReX
-            # overrides via a per-launch settings_advanced.json. These are
-            # the knobs that directly enable rescue patterns the LLM was
-            # asking for ("pLDDT good but iPAE bad → raise weights_pae_inter").
+            # These settings override the backend advanced-settings file for each
+            # launch.
             "weights_plddt":      (0.05, 0.40),
             "weights_pae_inter":  (0.05, 0.40),
             "weights_iptm":       (0.02, 0.20),
@@ -649,15 +532,7 @@ def default_registry(
             "mpnn_fix_interface": [True, False],
         },
         "boltzgen": {
-            # HIGH 1 fix: align with _exec_boltzgen_async cd.get keys
-            # fix20: protocol enum must match `boltzgen run --protocol` whitelist.
-            # `protein-protein` is NOT valid — was a fix19 fabrication that made
-            # every LLM-chosen run with that protocol exit 2 (CD45 r1/r2,
-            # SC2RBD r1 in fix19).
-            # Only expose protocols whose required YAML semantics are implemented
-            # by the T-ReX launcher. protein-redesign needs explicit design masks;
-            # selecting it here would look adaptive while running with incomplete
-            # semantics.
+            # Expose only protocols whose required inputs the launcher implements.
             "protocol": ["protein-anything"],
             "num_designs": (8.0, 128.0),
             "budget": (1.0, 16.0),
@@ -677,8 +552,6 @@ def default_registry(
             availability="available",
             allowed_params=LOCAL_PARAMS["complexa_beam"],
         ),
-        # B-012 fix (2026-05-26): unsupported legacy Complexa aliases
-        # capability entries removed — see LOCAL_PARAMS comment for context.
         "complexa_best_of_n": Capability(
             family="complexa_best_of_n",
             default_operator_id="complexa_best_of_n_default",
@@ -761,14 +634,9 @@ def default_registry(
         )
     # External generators — diagnostic flag varies by family.
     EXT_ROLE_META = {
-        # BindCraft: PROVENANCE FIX (2026-05-31). Its native metrics come from
-        # the AF2 prediction it OPTIMIZED AGAINST (best-of-5, optimistic) and
-        # its CSV "Binder_RMSD" is cross-model/monomer RMSD, NOT the paper's
-        # binder-in-complex Cα scRMSD. The Proteina-Complexa paper (App. F)
-        # scores ALL methods — incl. BindCraft — under one INDEPENDENT
-        # ColabDesign AF2 re-fold (initial-guess + templating). So treat
-        # BindCraft as diagnostic-only and chain parseable artifacts through
-        # structure_refilter (= that same independent AF2) for the strict gate.
+        # BindCraft native scores and Binder_RMSD are diagnostic. Its structures require
+        # independent standardized AF2 evaluation for the canonical qualification
+        # measurements.
         "bindcraft":   {"role": "generator", "requires_parent_pdb": False, "outputs_diagnostic_only": True},
         # BoltzGen: native generator scoring is diagnostic until canonical AF2 score conversion.
         "boltzgen":    {"role": "generator", "requires_parent_pdb": False, "outputs_diagnostic_only": True},
@@ -782,7 +650,7 @@ def default_registry(
             default_cost_class="diagnostic",
             runtime_bucket_id=runtime_bucket_id if ext in available_external else None,
             availability="available" if ext in available_external else "unavailable",
-            notes="external generator — first use is diagnostic, never extended (plan §12.4)",
+            notes="external generator — first use is diagnostic, never extended",
             allowed_params=EXTERNAL_PARAMS[ext] if ext in available_external else {},
             role=meta["role"],  # type: ignore[arg-type]
             requires_parent_pdb=meta["requires_parent_pdb"],

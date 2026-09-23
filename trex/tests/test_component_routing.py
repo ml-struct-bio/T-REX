@@ -1,13 +1,5 @@
-"""Do-now bundle (2026-05-30): per-component diagnosis + routed remediation.
-
-Covers the four changes that let the LLM route remediation by the diagnosed
-failing component (sequence / structure / interface) and reward the faster route:
-  rec 1  per-candidate `dominant_deficit_axis` (margin-normalized worst axis)
-  rec 2  per-recipe `su_per_gpu_h` (route-level SPEED credit, strict recipes only)
-  rec 3  axis-matched config SOFT-DEFAULT when the LLM names a family but gives
-         no config (scRMSD->sequence_hallucination, iPAE->metric-adaptive sc_scale_noise, pLDDT->none)
-  rec 4  give-up-and-regenerate floor: `stuck_lineage_roots` + builder blocks
-         refinements of a stuck parent backbone
+"""Tests for measurement-specific hypotheses, route accounting, refinement defaults, and
+exhausted lineages.
 """
 
 from __future__ import annotations
@@ -50,9 +42,7 @@ STRICT = {"pLDDT": 95.0, "iPAE": 0.1, "binder_scRMSD": 1.0}
 
 def _rec(rid, fam, metrics, *, parent=None, gpu_h=0.5, bins=None, tick="v7r001"):
     bins = dict(bins or {})
-    # SSOT (2026-05-31): production sets BOTH bins on a strict record —
-    # foldseek (whole-archive, duplicate_fraction) + foldseek_su (strict-only,
-    # SU dedup). Mirror that so SU-dedup tests exercise the real foldseek_su path.
+    # Provide both scored-structure and strict-only cluster bins.
     if "foldseek" in bins and "foldseek_su" not in bins:
         bins["foldseek_su"] = bins["foldseek"]
     return ResultRecord(
@@ -63,7 +53,7 @@ def _rec(rid, fam, metrics, *, parent=None, gpu_h=0.5, bins=None, tick="v7r001")
     )
 
 
-# --- rec 1: dominant_deficit_axis -------------------------------------------
+# dominant_deficit_axis
 
 def test_dominant_deficit_axis_none_when_all_pass():
     assert dominant_deficit_axis({}) is None
@@ -91,7 +81,7 @@ def test_representative_examples_sets_dominant_axis():
     assert ex[0].dominant_deficit_axis == "iPAE"
 
 
-# --- rec 2: per-recipe su_per_gpu_h -----------------------------------------
+# Per-recipe SU per GPU-hour
 
 def _su_recipe(records):
     recs = extract_recipes(records, current_tick=1)
@@ -135,7 +125,7 @@ def test_recipe_su_per_gpu_h_none_for_non_strict():
             assert r.su_per_gpu_h is None
 
 
-# --- rec 4: stuck_lineage_roots ---------------------------------------------
+# stuck_lineage_roots
 
 def test_stuck_lineage_flags_parent_after_k_non_improving():
     cfg = ReducerConfig()
@@ -160,7 +150,6 @@ def test_complexa_ipae_noise_pair_adds_sequence_hallucination():
     assert cand.config_delta["sc_scale_noise"] == 0.30
     assert cand.config_delta["refinement_algorithm"] == "sequence_hallucination"
     assert any("auto_pair:refinement_algorithm=sequence_hallucination" in r for r in cand.feasibility.reasons)
-
 
 
 def test_v73_sparse_complexa_reward_retry_defers_reward_to_material_search():
@@ -291,7 +280,7 @@ def test_stuck_lineage_below_k_not_flagged():
     assert stuck_lineage_roots([parent, *kids], cfg) == []  # iPAE needs K=3
 
 
-# --- rec 3 + rec 4 through build_candidates ---------------------------------
+# Candidate construction with axis-specific settings and exhausted parent lineages
 
 def _evidence(*, stuck=None, recipes=None, exemplars=None,
               production_panel_selected_ids=None,
@@ -393,9 +382,8 @@ def test_rec4_blocks_refinement_of_stuck_parent():
 
 
 def test_rec4_does_not_block_denovo_generator_citing_stuck_parent():
-    # C-2 fix: a de-novo generator (complexa_beam, requires_parent_pdb=False) does
-    # NOT consume the parent backbone; citing a stuck parent as lineage is a fresh
-    # regeneration (what the give-up floor WANTS) and must not be blocked.
+    # A generator that does not consume the parent structure remains eligible when
+    # citing a parent whose refinement lineage is exhausted.
     ev = _evidence(stuck=_STUCK)
     c = _only(build_candidates([_hyp(axis="iPAE", family="complexa_beam",
                                      baseline=("P",))], ev, include_warmstart=False))
@@ -412,7 +400,6 @@ def test_rec4_does_not_block_non_stuck_parent():
     assert c.parent_result_id == "Q"
 
 
-# GAP 2 (2026-06-13): per-(parent, rescue-family) exhaustion.
 _STUCK_PARTIAL = [{"root_result_id": "P", "family": "complexa_beam",
                    "dominant_axis": "iPAE", "attempts": 3,
                    "reason": "no_improvement_after_3",
@@ -428,8 +415,7 @@ def test_gap2_blocks_only_the_exhausted_rescue_family():
 
 
 def test_gap2_allows_untried_rescue_family_on_same_parent():
-    # structure_refilter is NOT exhausted on P -> still allowed to try it before
-    # abandoning the parent (the review's "switch family" behaviour).
+    # An unexhausted family can still refine this parent.
     ev = _evidence(stuck=_STUCK_PARTIAL, exemplars=[_exemplar("P")], parent_artifact_result_ids=["P"])
     c = _only(build_candidates([_hyp(axis="iPAE", family="structure_refilter",
                                      baseline=("P",))], ev, include_warmstart=False))
@@ -490,7 +476,6 @@ def test_deep_stall_complexa_only_cards_get_two_cross_family_probes():
     fams = {c.method_family for c in cross if c.feasibility.all_ok()}
     assert {"bindcraft", "boltzgen"} <= fams
     assert any(c.hypothesis_ids == ["h1"] and c.method_family == "complexa_beam" for c in cands)
-
 
 
 def test_diagnostic_i4_mcts_seed_from_plddt_fail_ipae_pass():
@@ -1021,7 +1006,6 @@ def test_parent_required_accepts_known_explicit_result_id_ref():
     assert c.baseline_result_id == rid
 
 
-
 def test_reduce_evidence_records_only_artifact_backed_parent_ids(tmp_path):
     pdb = tmp_path / "parent.pdb"
     pdb.write_text("ATOM\n")
@@ -1155,7 +1139,6 @@ def test_recipe_hash_alias_prefers_non_joint_fail_representative():
     assert c.feasibility.all_ok()
 
 
-
 def _parent_source_hyp(parent_ref: str, action_text: str) -> HypothesisCard:
     return HypothesisCard(
         hypothesis_id="h1", target_id="t", tick_created=1,
@@ -1267,7 +1250,6 @@ def test_joint_fail_soft_probe_becomes_rescue_exhausted_after_non_improving_mpnn
     assert any("rescue_exhausted:dead_parent:proteinmpnn_redesign" in r for r in c.feasibility.reasons)
 
 
-
 def test_diagnostic_joint_fail_parent_score_conversion_remains_feasible_without_caution():
     jf = Recipe(
         recipe_hash="diag", operator_id="boltzgen_default", method_family="boltzgen",
@@ -1346,8 +1328,6 @@ def test_conflicting_per_axis_baselines_are_not_silently_collapsed():
     assert "inconsistent_baseline_refs" in cand.feasibility.reasons
 
 
-# --- review fixes: M1 (refilter exclusion), M2 (route-total), M3, M4 ----------
-
 def test_m1_strict_refilter_recipe_has_no_su_per_gpu_h():
     # structure_refilter is role=refilter: it re-scores at ~0 gpu_h, so crediting
     # it ~20 SU/gpu-h would mis-steer exploit. Mirror the method_health exclusion.
@@ -1379,8 +1359,6 @@ def test_m4_child_closing_a_nondominant_axis_is_progress():
     stuck = stuck_lineage_roots([parent, *kids], cfg)
     assert "P" not in {e["root_result_id"] for e in stuck}
 
-
-# --- eval fixes (C-4, C-10) ---------------------------------------------------
 
 def test_c4_diagnostic_only_family_rate_is_none_not_zero():
     # proteinmpnn_redesign is outputs_diagnostic_only: it emits no strict metrics
@@ -1481,10 +1459,8 @@ def test_exemplars_toggle_off_yields_empty():
 
 
 def test_c1_bindcraft_records_get_distinct_pdb_path(tmp_path):
-    # C-1 [HIGH]: each accepted BindCraft design must carry its OWN pdb_path, not
-    # just the shared launch-level Accepted/ dir — otherwise the Foldseek resolver
-    # hands every record the same first PDB and N distinct successes collapse to
-    # 1 SU, undercounting the objective for the productive lane.
+    # Each accepted design needs its own structure path. A shared directory can
+    # resolve to the same PDB for multiple records and undercount structural diversity.
     from trex.output_parsers.bindcraft import parse_bindcraft_output
     from trex.output_parsers.types import ParserContext
     acc = tmp_path / "designs" / "Accepted"
@@ -1527,13 +1503,7 @@ def test_bindcraft_accepted_pdb_match_requires_design_boundary(tmp_path):
 
 
 def test_bindcraft_records_diagnostic_only_for_provenance_chain(tmp_path):
-    """PROVENANCE FIX (2026-05-31): BindCraft must NOT self-report the
-    strict-gate metrics (it scores on the AF2 it optimized against + a
-    cross-model 'Binder_RMSD' that isn't binder-in-complex scRMSD). Its
-    records are diagnostic-only (no pLDDT/iPAE/binder_scRMSD → is_strict_success
-    False → no double-count) with native scores under bindcraft_native_* and a
-    rank score for the auto-chain; the Accepted PDB is chained through
-    structure_refilter for canonical strict scoring (paper App. F)."""
+    """BindCraft native scores remain diagnostic until standardized evaluation."""
     from trex.output_parsers.bindcraft import parse_bindcraft_output
     from trex.output_parsers.types import ParserContext
     from trex.success_criteria import is_strict_success
@@ -1624,9 +1594,7 @@ def test_bindcraft_capability_is_diagnostic_only_so_it_chains():
 
 
 def test_af2_refilter_partial_strict_axes_are_all_or_none(tmp_path):
-    """strict_gate_nearmiss LOW (2026-05-31): a refold missing binder_scrmsd_ca
-    must NOT leave a 2-axis record (which would make is_near_miss fire with the
-    blocking axis unknown). All 3 strict axes are emitted together or not at all."""
+    """A missing qualification measurement prevents partial canonical scoring."""
     import json
     from trex.output_parsers.af2_refilter import parse_af2_refilter_output
     from trex.output_parsers.types import ParserContext
@@ -1645,11 +1613,7 @@ def test_af2_refilter_partial_strict_axes_are_all_or_none(tmp_path):
     assert m.get("ipTM") == 0.8  # diagnostic axis still surfaced
 
 
-# --- final-gate fixes (Bug A, supervisor stub leak) ---------------------------
-
 def test_bugA_planner_threads_llm_timeout():
-    # Bug A [HIGH]: the per-call timeout must reach the client, else a hung vLLM
-    # blocks the synchronous controller reap loop for the SDK default (minutes).
     from unittest.mock import patch
     from trex.planner import call_planner, PlannerCallConfig
     cfg = PlannerCallConfig(model="vllm/x", base_url="http://x/v1", timeout_s=90.0)

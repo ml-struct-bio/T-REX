@@ -1,32 +1,9 @@
-"""Foldseek-based structural clustering for T-ReX archive ResultRecords.
+"""Foldseek clustering of archived binder structures.
 
-Plan §2.5 SSOT: run-level structurally-unique success (SU) count is
-strict_success filtered THEN Foldseek-deduped. Before this module was
-wired (2026-05-27), `live_tick` had no Foldseek bin and could over-count
-strict records as unique. The current official path has no per-result
-fallback: strict records without a trusted Foldseek SU bin do not mint SU.
-
-This module provides the required Foldseek bin. It:
-  1. Collects every ResultRecord with a usable binder PDB / CIF artifact.
-  2. Runs `foldseek easy-cluster` on the structures.
-  3. Returns a {result_id → cluster_id} map that `live_tick` uses to
-     populate the in-memory `bins["foldseek"]` view before SU is
-     computed.
-
-Design adapted from the project archival structure-clustering implementation
-(Foldseek invocation pattern, cluster TSV parsing). V5's module is bound
-to its `CandidateDiagnosis` schema; this is a T-ReX-native variant working
-directly on `ResultRecord`.
-
-Foldseek-unavailable behavior: returns an empty map with status="no_binary".
-Official SU has no result_id fallback: strict records remain quality evidence,
-but they do not mint Foldseek-deduped SU until a trusted Foldseek bin exists.
-
-The mapping is computed in-memory per tick; not persisted to the archive
-(consistent with `live_tick`'s existing pattern of treating bins as
-parser-set + live-derived). For a 48 h run with ~100-500 candidates,
-re-clustering every tick is cheap (Foldseek runs in seconds on this
-scale and the cluster map can be cached if needed).
+Run strict-success clustering separately for SU counts and scored-structure clustering
+for duplication evidence. Missing binaries or untrusted binder identities produce no
+fallback SU credit. Cluster mappings update the in-memory evidence view; archived
+records remain unchanged.
 """
 
 from __future__ import annotations
@@ -41,6 +18,7 @@ from pathlib import Path
 
 from .af2_chain_identity import resolve_prediction_chains, validate_prediction_chains
 from .schemas import ResultRecord
+from .output_identity import MAP_KEY, STATUS_KEY, validate_output_chains
 
 
 @dataclass(frozen=True)
@@ -57,7 +35,7 @@ class ClusteringResult:
 
 
 def _safe_stem(value: str) -> str:
-    """ASCII-clean filesystem-safe stem (matches v5 helper)."""
+    """Return an ASCII filesystem-safe stem."""
     return "".join(
         ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in value
     ).strip("_")[:80]
@@ -74,6 +52,8 @@ def _pdb_chain_ids(path: Path) -> set[str]:
     chains: set[str] = set()
     try:
         for line in path.read_text(errors="replace").splitlines():
+            if line.startswith("ENDMDL"):
+                break
             if line.startswith(("ATOM  ", "HETATM")) and len(line) > 21:
                 ch = line[21].strip()
                 if ch:
@@ -93,6 +73,14 @@ def _record_binder_chain(r: ResultRecord, default: str = "B") -> str:
     """
     art = getattr(r, "artifacts", None) or {}
     bins = getattr(r, "bins", None) or {}
+    if bins.get(STATUS_KEY) == "unresolved":
+        return ""
+    if MAP_KEY in art:
+        try:
+            mapping = validate_output_chains(json.loads(art[MAP_KEY]), Path(art["pdb_path"]))
+            return mapping["binder_chain"]
+        except (OSError, ValueError, TypeError, KeyError):
+            return ""
     is_af2 = (
         "af2_strict_basis" in bins or "af2_chain_identity" in bins
         or "af2_prediction_chains" in art or "af2_report_path" in art
@@ -126,6 +114,11 @@ def _record_binder_chain(r: ResultRecord, default: str = "B") -> str:
             value = str(mapping.get(key, "") or "").strip()
             if value:
                 return value.split(",")[0].strip() or default
+    # Complexa can relabel its input target. Missing output metadata cannot
+    # be recovered from a campaign-level chain label. Archive-aware callers
+    # prepare verified output maps before reaching this helper.
+    if r.backend_family.startswith("complexa"):
+        return ""
     return default
 
 
@@ -137,7 +130,7 @@ def _write_chain_only_pdb(
 ) -> tuple[bool, str | None]:
     """Write a single-chain PDB for Foldseek clustering.
 
-    T-ReX evaluates binder diversity, not target diversity. Multi-chain complex PDBs
+    T-REX evaluates binder diversity, not target diversity. Multi-chain complex PDBs
     all contain the same target chain, and Foldseek emits per-chain entries; if
     the shared target chain is allowed into clustering, the result_id-level map can
     be contaminated by target-chain clusters. Prefer the controller-recorded binder chain, with B retained only as the single-chain target convention.
@@ -149,16 +142,17 @@ def _write_chain_only_pdb(
         return False, None
     if preferred_chain in chains:
         chain = preferred_chain
-    elif len(chains) == 1:
-        chain = next(iter(chains))
     else:
-        non_a = sorted(ch for ch in chains if ch != "A")
-        chain = non_a[0] if non_a else sorted(chains)[0]
+        return False, None
 
     wrote_atom = False
     out_lines: list[str] = []
     try:
         for line in src.read_text(errors="replace").splitlines():
+            # Identity verification reads the first model only. Later models
+            # can use the same labels for different chains.
+            if line.startswith("ENDMDL"):
+                break
             if line.startswith(("ATOM  ", "HETATM")):
                 if len(line) > 21 and line[21].strip() == chain:
                     out_lines.append(line)
@@ -178,7 +172,7 @@ def _write_chain_only_pdb(
 def _pdb_for_result(r: ResultRecord) -> Path | None:
     """Locate a usable binder structure file for a ResultRecord.
 
-    T-ReX result parsers store the structure at `artifacts["pdb_path"]`
+    T-REX result parsers store the structure at `artifacts["pdb_path"]`
     (BindCraft, Complexa) or under `artifacts["pdb_dir"]` (some refilter
     paths). Mirrors `controller._resolve_parent_artifact`'s
     discovery logic.
@@ -201,20 +195,12 @@ def _pdb_for_result(r: ResultRecord) -> Path | None:
 
 
 def _resolve_stem(stem: str, name_to_result_id: dict[str, str]) -> str | None:
-    """Map a foldseek output stem back to its result_id.
+    """Map a Foldseek output stem to a known input result ID.
 
-    foldseek appends suffixes to the input stem for multi-CHAIN and
-    multi-MODEL inputs — e.g. a 2-chain complex `<rid>.pdb` emits `<rid>_A`
-    / `<rid>_B`, and a MULTI-MODEL refilter PDB (af2_refilter saves all AF2
-    models, get_best=False) emits `<rid>_MODEL_3_A` etc. The old single
-    `rpartition('_')` stripped only ONE trailing token, so `<rid>_MODEL_3_A`
-    never matched `<rid>` → the record got NO foldseek_su bin. Under the
-    old fallback contract that over-counted SU via refilter_source/result_id;
-    under the current official no-fallback contract it would silently lose SU
-    credit. Fix: strip trailing `_<token>`
-    segments until the remaining prefix is a known input stem. The input
-    stems are `_safe_stem(result_id)` and result_id is a hex hash (no '_'),
-    so the loop stops exactly at the result_id — no risk of over-stripping.
+    Foldseek can append chain or model suffixes, such as ``_A`` or
+    ``_MODEL_3_A``. Prefer an exact input-stem match, then remove trailing
+    underscore-delimited segments until a known stem is found. Return None
+    when no input matches; an unknown stem cannot receive cluster credit.
     """
     if stem in name_to_result_id:
         return name_to_result_id[stem]
@@ -258,17 +244,12 @@ def _parse_cluster_tsv(
 
 
 def _scored_pdb_path(r: ResultRecord) -> Path | None:
-    """Binder structure path for a record IFF it is an eligible clustering input:
-    exit_status == "ok", carries >=1 strict-axis metric (pLDDT/iPAE/binder_scRMSD),
-    and has a resolvable PDB/CIF artifact. (Unscored raw intermediates — e.g.
-    proteinmpnn redesigns awaiting AF2 refilter — are excluded: threaded onto the
-    same backbone, they would collapse into one cluster and inflate
-    duplicate_fraction; their REFILTERED outputs are the scored structures.)
+    """Return the artifact for a successful record with at least one qualification
+    measurement.
 
-    SINGLE SOURCE of the "scored structure" predicate — shared by
-    cluster_archive_pdbs, the clustering-cache fingerprint, and the R1
-    whole-archive windowing selection so the three cannot drift (a drift would
-    let a cache hit serve a clustering over a different input set → wrong SU)."""
+    This predicate is shared by clustering, cache fingerprints, and scored-window
+    selection. Unscored intermediates are excluded.
+    """
     if r.exit_status != "ok":
         return None
     m = r.metrics or {}
@@ -282,39 +263,18 @@ def cluster_archive_pdbs(
     *,
     target_id: str,
     foldseek_binary: str = "foldseek",
-    min_tm_score: float = 0.60,  # T-ReX live objective; report 0.5/0.6/0.8 as a sweep.
+    min_tm_score: float = 0.60,  # T-REX live objective; report 0.5/0.6/0.8 as a sweep.
     timeout_seconds: int = 600,
     only_result_ids: set[str] | None = None,
     structure_scope: str = "binder_chain",
     binder_chain_id: str = "B",
     alignment_type: int | None = 1,
 ) -> ClusteringResult:
-    """Cluster every binder structure in the archive's ResultRecords.
+    """Cluster eligible binder structures, optionally restricted to selected result IDs.
 
-    Filtering:
-      - target_id match (skip foreign target results)
-      - exit_status == "ok"
-      - has a usable PDB / CIF artifact
-      - if ``only_result_ids`` is given, restrict to that subset (used for
-        the strict-only SU clustering — see SSOT note below).
-
-    SSOT NOTE (2026-05-31, bug fix): the SU count must be the number of
-    distinct clusters *among the strict-success structures clustered by
-    themselves* (docstring §2.5: "strict_success filtered THEN
-    Foldseek-deduped"). Clustering the WHOLE archive (incl. non-strict
-    structures) and then reading strict members' labels lets a non-strict
-    "hub" structure (TM>=0.80 to several strict hits that are themselves
-    TM<0.80 apart) transitively merge dissimilar strict successes into one
-    cluster via single-linkage — undercounting SU (verified: BetV1 s2 6 vs
-    15). So `live_tick` calls this twice: once over the whole scored
-    archive (for duplicate_fraction / top_bin_share, which legitimately
-    need all structures) and once with ``only_result_ids`` = the strict set
-    (for SU).
-
-    Returns a `ClusteringResult` containing `cluster_by_result_id`. If
-    Foldseek is unavailable, returns `status="no_binary"` and an empty
-    map. Official SU has no per-result fallback; `live_tick` may still
-    report strict_count, but no Foldseek-deduped SU is minted from this pass.
+    SU counting clusters qualified designs separately: nonqualified structures must not
+    merge otherwise distinct qualified clusters. Missing Foldseek returns an empty
+    mapping with no_binary status; no per-result SU fallback is allowed.
     """
     pdbs: dict[str, Path] = {}
     rec_by_rid: dict = {}  # rid -> its OWN ResultRecord (for per-record binder chain)
@@ -360,10 +320,7 @@ def cluster_archive_pdbs(
                 stem = _safe_stem(rid) or f"r_{idx:05d}"
                 if structure_scope == "binder_chain":
                     dest = input_dir / f"{stem}.pdb"
-                    # BUGFIX (2026-06-13): use THIS rid's own record for the binder
-                    # chain, not the stale `r` left over from the filter loop above
-                    # (which extracted every structure with the LAST record's chain
-                    # — corrupting SU on multichain targets, e.g. TNF trimer).
+                    # Resolve the binder identity separately for each result.
                     ok, _chain = _write_chain_only_pdb(
                         path,
                         dest,
@@ -372,18 +329,9 @@ def cluster_archive_pdbs(
                         ),
                     )
                     if not ok:
-                        # NEW-001 (2026-06-18): do NOT fall back to copying the FULL
-                        # complex into a binder-chain easy-cluster run. A full
-                        # binder+target complex never reaches TM>=threshold against a
-                        # binder-only chain, so it would form a bogus singleton and
-                        # INFLATE the SU count (over-count by ~#fallbacks) while
-                        # foldseek_su_coverage still reads 1.0 (it "got a bin"),
-                        # leaving su_dedup_trusted=True on a contaminated count.
-                        # Instead SKIP it: the record gets no foldseek_su bin and
-                        # therefore mints no official SU/new-SU. The missing bin
-                        # drops coverage<1.0 -> su_dedup_trusted=False, so state,
-                        # route value, and Selector decisions cannot trust a
-                        # contaminated/incomplete SU signal.
+                        # Skip unresolved binder chains. Mixing whole complexes with
+                        # binder-only structures would create invalid clusters and
+                        # misleading coverage.
                         n_scope_fallback += 1
                         continue
                 else:
@@ -391,10 +339,8 @@ def cluster_archive_pdbs(
                     _link_or_copy(path, dest)
                 name_to_rid[dest.stem] = rid
 
-            # Scope validation must precede the mathematical singleton shortcut.
-            # Merely existing with a .pdb/.cif suffix is not proof that a binder
-            # chain can be extracted: truncated files and unsupported CIF scope
-            # used to mint one official SU only while they were the sole record.
+            # Validate binder extraction before the singleton shortcut; file
+            # existence alone does not establish a clusterable structure.
             if not name_to_rid:
                 return ClusteringResult(
                     cluster_by_result_id={},
@@ -417,28 +363,17 @@ def cluster_archive_pdbs(
 
             out_prefix = tmp / "clusters"
             work_dir = tmp / "work"
-            # `easy-cluster` is a greedy set-cover; without --threads 1
-            # the same input produces wildly different cluster counts
-            # round-to-round because parallel workers race on the
-            # cluster-representative pick (observed 57 / 76 / 35 clusters
-            # on the same 218-structure archive in job 8838208).
-            #
-            # Newer Foldseek builds also accept `--shuffle 0` to disable
-            # input shuffling, but this build rejects it
-            # ("Unrecognized parameter '--shuffle'", observed in job
-            # 8855459). With single-thread the race is gone, and input
-            # order is determined by sorted(pdbs.items()) above, so the
-            # result is reproducible without --shuffle.
+            # Use one thread and sorted inputs to make greedy representative selection stable.
+            # Avoid --shuffle because it is unavailable in some supported Foldseek builds.
             cmd = [
                 binary,
                 "easy-cluster",
                 str(input_dir),
                 str(out_prefix),
                 str(work_dir),
-                # Deterministic monomer/binder-chain clustering. The caller
-                # chooses the TM threshold: the OFFICIAL Proteina-Complexa SU
-                # live objective is 0.6; 0.5/0.8 are post-hoc
-                # sweep points only.
+                # Cluster binder structures at the caller's TM threshold.
+                # The live SU threshold is 0.6; diagnostic and post-hoc passes
+                # can request different thresholds.
                 "--tmscore-threshold",
                 str(min_tm_score),
                 "--min-seq-id",
@@ -502,17 +437,10 @@ def apply_clusters_to_bins(
     cluster_map: dict[str, str],
     bin_key: str = "foldseek",
 ) -> int:
-    """Inject `bins[bin_key]` into every result that has a cluster_id.
+    """Add cluster IDs to in-memory result bins and return the number updated.
 
-    Returns the number of results updated. ResultRecord is frozen so we
-    mutate the bins dict in place (the dataclass holds a reference to the
-    same dict — Python doesn't enforce dict immutability on frozen
-    dataclasses). `bins` is schema-required to be a `dict[str, str]`
-    (default_factory=dict), so we don't guard against None.
-
-    bin_key="foldseek" → whole-archive cluster (duplicate_fraction /
-    top_bin_share). bin_key="foldseek_su" → strict-only cluster (the SU
-    count; see cluster_archive_pdbs SSOT note).
+    The frozen dataclass contains a mutable bins mapping. foldseek denotes
+    scored-structure clustering; foldseek_su denotes strict-only clustering.
     """
     n = 0
     for r in results:

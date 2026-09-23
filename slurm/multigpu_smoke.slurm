@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 
-# Allocation-only smoke for T-ReX worker scaling. Override --gres and
+# Allocation-only smoke for T-REX worker scaling. Override --gres and
 # TREX_WORKER_GPUS at submission to test a larger node. This does not launch an
 # LLM or a molecular-design backend and therefore works with any CUDA GPU type.
 
@@ -18,7 +18,7 @@ PYTHON="${TREX_TEST_PYTHON:-python}"
 TREX_WORKER_GPUS="${TREX_WORKER_GPUS:-1,2,3}"
 
 [[ -r "${REPO}/trex/controller.py" ]] || {
-  echo "[FATAL] submit from the T-ReX root or set TREX_REPO_ROOT" >&2
+  echo "[FATAL] submit from the T-REX root or set TREX_REPO_ROOT" >&2
   exit 2
 }
 [[ -x "${PYTHON}" ]] || {
@@ -89,6 +89,8 @@ export TREX_WORKER_GPUS
 "${PYTHON}" -m pytest -q \
   "${REPO}/trex/tests/test_live_tick.py::test_worker_wall_gpu_count_scales_beyond_reference_pool" \
   "${REPO}/trex/tests/test_event_driven_controller.py" \
+  "${REPO}/trex/tests/test_output_identity.py" \
+  "${REPO}/trex/tests/test_output_identity_boundaries.py" \
   "${REPO}/trex/tests/test_selector.py::test_batch_diversity_caps_family_repetition"
 
-echo "T-ReX multi-GPU smoke passed: visible=${VISIBLE_GPU_COUNT} workers=${#WORKER_GPUS[@]}"
+echo "T-REX multi-GPU smoke passed: visible=${VISIBLE_GPU_COUNT} workers=${#WORKER_GPUS[@]}"

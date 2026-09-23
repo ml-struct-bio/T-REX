@@ -10,11 +10,12 @@ cd "${REPO}"
 "${PYTHON}" -m pytest -q
 "${PYTHON}" -m trex.tests.policy_contracts \
   --repo-root "${REPO}" --out "${TMPDIR:-/tmp}/trex_deterministic_smoke.json"
-"${PYTHON}" benchmarks/paper_7target_144h/verify.py
-bash -n slurm/trex_per_target_node.slurm
+bash -n slurm/T-REX.slurm
 bash -n slurm/publication_preflight.slurm
 bash -n slurm/multigpu_smoke.slurm
 bash -n scripts/run_controller.sh
+bash -n scripts/submit.sh
+bash -n .env.example
 git diff --check
 
 WHEEL_SMOKE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/trex-wheel-smoke.XXXXXX")"
@@ -30,8 +31,9 @@ if ! "${PYTHON}" -m build \
   exit 1
 fi
 echo "Built source distribution and wheel for isolated smoke."
+"${PYTHON}" scripts/check_distribution.py --dist-dir "${WHEEL_SMOKE_ROOT}/dist"
 "${PYTHON}" -m venv "${WHEEL_SMOKE_ROOT}/venv"
-# Install T-ReX before exposing the parent environment, so pip cannot satisfy
+# Install T-REX before exposing the parent environment, so pip cannot satisfy
 # the request with an editable/source-tree copy of the same distribution.
 WHEEL_PATHS=("${WHEEL_SMOKE_ROOT}"/dist/*.whl)
 if [[ "${#WHEEL_PATHS[@]}" -ne 1 || ! -f "${WHEEL_PATHS[0]}" ]]; then
@@ -65,4 +67,4 @@ cleanup_wheel_smoke
 trap - EXIT
 
 
-echo "T-ReX release checks passed."
+echo "T-REX release checks passed."

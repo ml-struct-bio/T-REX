@@ -1,24 +1,7 @@
-"""PROTOTYPE (architecture bottleneck #2): unified reasoner — collapse the
-Planner + Supervisor into ONE qualitative-reasoner LLM call.
+"""Optional deterministic Supervisor output derived from Planner cards.
 
-The architecture audit found the Supervisor's scalar ``mode_mixture`` is now
-largely redundant with the Planner's per-card ``mode_affinity`` — and the HYBRID
-selector already derives the operative budget from the ranked ``candidate_decisions``.
-So a second LLM call (the Supervisor) mostly RE-RANKS what the Planner already
-expressed, while adding a Planner/Supervisor disagreement surface and ~2x LLM cost.
-
-This module deterministically derives the Supervisor's output (per-candidate mode
-+ rank + the scalar mixture) FROM the Planner's cards, with NO second LLM call:
-the Planner proposes hypotheses (mode_affinity + configs), the CandidateBuilder
-validates them into ActionCandidates, and ``build_unified_supervisor_output`` maps
-each candidate to its source card's mode (argmax mode_affinity) and ranks within
-mode. The SAME Selector + hybrid + clamps + deficit-fill consume the result.
-
-Wire-up (prototype): when the controller opts into the unified path it calls
-``build_unified_supervisor_output(planner_out, candidates)`` instead of
-``supervisor.call_supervisor(...)``. One LLM call instead of two; one coherent
-qualitative reasoner → deterministic lab automation. NEEDS LLM re-validation
-before production (the Planner prompt would absorb the Supervisor's ranking job).
+This experimental alternative avoids a separate Supervisor LLM call; it is not the
+default campaign path.
 """
 from __future__ import annotations
 
@@ -48,19 +31,10 @@ def build_unified_supervisor_output(
     *,
     cards: list[HypothesisCard] | None = None,
 ) -> SupervisorOutput:
-    """Derive a SupervisorOutput from the Planner cards — no second LLM call.
+    """Derive candidate modes, ordering, and allocation from Planner cards.
 
-    Each candidate inherits the mode of its source HypothesisCard (via
-    hypothesis_ids → mode_affinity argmax) and is ranked within that mode by the
-    Planner's candidate order. The scalar mode_mixture is the normalized aggregate
-    of the cards' mode_affinity (the hybrid selector will derive the operative
-    budget from the decisions; the scalar is only the fallback path).
-
-    ``cards`` overrides ``planner_out.cards`` for the candidate→card mapping. The
-    caller passes the SAME card list the candidates were built from — on the
-    planner-fallback path that is the REUSED ``active_hyps``, not the (empty)
-    fallback ``planner_out.cards``; without this override every candidate's card
-    would be missing and all decisions would degenerate to explore.
+    The optional cards argument supplies the hypotheses used to construct
+    candidates, including hypotheses reused after a Planner fallback.
     """
     source_cards = cards if cards is not None else (planner_out.cards or [])
     cards_by_id = {c.hypothesis_id: c for c in source_cards}

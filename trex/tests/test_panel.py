@@ -114,7 +114,7 @@ def test_select_panel_skips_not_panel_ready():
 
 
 def test_panel_value_sums_dweight_history():
-    """Bug fix from v1: panel_value uses dweight at the time of selection."""
+    """Panel value uses each design weight at the time of selection."""
     a = _cand("a", foldseek="FS_a")
     b = _cand("b", foldseek="FS_b")
     c = _cand(
@@ -309,9 +309,6 @@ def test_panel_cli_output_is_versioned_and_prevents_duplicate_append(tmp_path, c
     assert panel_main(args) == 2
     assert "already exists" in capsys.readouterr().err
     assert len(list(Archive(archive_root).iter_records(PanelSelection))) == 1
-
-
-# ---- registry-002 (2026-06-18): panel family bin = generating family ----
 
 
 def test_production_bins_family_uses_refilter_source_family():

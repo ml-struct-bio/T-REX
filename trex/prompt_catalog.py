@@ -165,7 +165,7 @@ def render_prompt_catalog(roles: Iterable[str]) -> str:
 
     catalog = build_prompt_catalog()
     chunks = [
-        "T-ReX available LLM prompt catalog",
+        "T-REX available LLM prompt catalog",
         f"Schema: {catalog['schema_version']}",
         "Catalog membership is not a record of model invocations.",
         "Cross-campaign memory: "

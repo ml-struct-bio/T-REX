@@ -1,4 +1,4 @@
-"""T-ReX success criteria — single source of truth.
+"""T-REX success criteria — single source of truth.
 
 The strict_success rule comes from the Complexa paper (Proteina). Same
 rule applies to all backend families because evaluation is performed on
@@ -59,11 +59,9 @@ STRICT_SUCCESS: dict[str, tuple[float, Literal["increase", "decrease"]]] = {
 
 
 def is_strict_success(metrics: dict[str, float]) -> bool:
-    """Apply the Complexa strict_success rule to a metrics dict.
+    """Return whether all three required measurements pass the qualification thresholds.
 
-    Missing axes are treated as failures (cannot prove success without
-    a verifier score on every axis). This matches the V6.3 behavior
-    where un-scored candidates are not counted as SU.
+    A missing measurement prevents qualification.
     """
     p = metrics.get("pLDDT")
     i = metrics.get("iPAE")
@@ -111,30 +109,11 @@ NEAR_MISS_MAX_HARD_FAIL_MARGIN_MULTIPLIER = 10.0
 
 
 def is_near_miss(metrics: dict[str, float]) -> bool:
-    """A result is near_miss iff all three axes are present, it is NOT
-    strict_success, and at most ONE axis is in the 'fail' region
-    (deficit > near_pass_margin); the rest are pass or near_pass. A lone hard
-    fail must remain within ``NEAR_MISS_MAX_HARD_FAIL_MARGIN_MULTIPLIER``
-    margins. More distant blockers remain available through axis statistics and
-    failure feedback but do not drive near-miss rescue accounting.
+    """Identify a complete, nonqualifying result close to the qualification thresholds.
 
-    Captures both:
-      - "obvious-blocker" near-miss (exactly 1 axis fail, others pass/near_pass)
-      - "barely-not-strict" near-miss (0 axes fail; one axis near_pass blocks strict)
-
-    This matches the user-intended notion "iPAE/pLDDT/scRMSD criteria에
-    거의 다가가는" — a result that almost passes the strict gate.
-
-    Single definition prevents the live_tick vs _classify_result drift
-    that was caught in beam_trap smoke 8721974.
-
-    scRMSD boundary note: the strict gate uses ``r < 1.5`` (strict), while the
-    near-miss margin logic below treats deficit ``d == 0`` (i.e. ``r == 1.5``)
-    as non-fail. So a design at EXACTLY scRMSD 1.5 (pLDDT/iPAE passing) is
-    not-strict but counts as a 0-axis-fail near_miss — the intended
-    "barely-not-strict" case, not a bug. Immaterial for float metrics, which
-    ~never land on the boundary; documented only to flag the deliberate
-    asymmetry between ``is_strict_success`` and the margin comparator.
+    At most one measurement may exceed its near-pass margin, and that deficit is
+    bounded by NEAR_MISS_MAX_HARD_FAIL_MARGIN_MULTIPLIER. Exact equality at a strict
+    cutoff may be a near miss even when its numerical deficit is zero.
     """
     if is_strict_success(metrics):
         return False

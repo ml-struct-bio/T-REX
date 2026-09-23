@@ -1,14 +1,5 @@
-"""Regression tests for the T-ReX-run-forensics bottleneck fixes (2026-06-10).
-
-Derived from a forensic audit of 307 T-ReX archives (adversarially double-checked):
-  F6  productive_duplicate state — high-SU + high-duplicate no longer aliases to
-      low_evidence (which drained exploit on fallback ticks + made the diversity
-      clamp unreachable).
-  F3  stuck_lineage_roots SU-aware arm — a strict-but-duplicate child no longer
-      reads as "improved", so a duplicate-collapsing lineage is flagged stuck.
-  F5  since-last-SU plateau governor — duration signal + deep_stall escalation.
-  F4  closed-loop chain-refilter throttle — refilter reserve/backfill stops when
-      recent refilters add ~0 new dedup-SU (with a cold-start guard).
+"""Tests for productive duplication, exhausted lineages, prolonged stalls, and evaluation
+throttling.
 """
 from __future__ import annotations
 
@@ -38,11 +29,8 @@ def _classify(**kw):
     return classify_state(**base)
 
 
-# ---- F6: productive_duplicate -------------------------------------------------
-
 def test_all_state_labels_present_in_all_clamp_tables():
-    # The fallback path does DEFAULT_MIXTURES[state]; a missing key would KeyError
-    # or silently revert to the bug. Every StateLabel must be in all three tables.
+    # Every StateLabel must have an entry in each fallback and clamp table.
     labels = set(typing.get_args(S.StateLabel))
     for name, tbl in (("DEFAULT_MIXTURES", DEFAULT_MIXTURES),
                       ("DEFAULT_CLAMPS", DEFAULT_CLAMPS),
@@ -86,9 +74,7 @@ def test_severe_collapse_is_still_stalled():
 
 
 def test_productive_duplicate_fallback_mixture_keeps_exploit_hot():
-    # The fallback drain bug: low_evidence default would be {0.35,0.30,0.35}.
-    # productive_duplicate keeps exploit-leaning so a fallback tick over a
-    # producing lane does not bleed budget off the winning lane.
+    # Productive duplication retains more exploitation than the low-evidence fallback.
     m = DEFAULT_MIXTURES["productive_duplicate"]
     assert m["exploit"] >= 0.50
     assert m["explore"] <= 0.15
@@ -96,8 +82,7 @@ def test_productive_duplicate_fallback_mixture_keeps_exploit_hot():
 
 
 def test_diversity_clamp_now_reachable_from_productive_duplicate():
-    # Previously keyed on state=="productive" only -> unreachable for this
-    # population (which never reaches productive). Now it loosens on collapse.
+    # Structural concentration can loosen the productive_duplicate allocation bounds.
     base = DEFAULT_CLAMPS["productive_duplicate"]
     adj, log = diversity_adjusted_clamp(
         base, "productive_duplicate", top_bin_share=0.85,
@@ -115,8 +100,6 @@ def test_productive_duplicate_clamp_normalizes():
     assert abs(sum(clamped.values()) - 1.0) < 1e-9
     assert clamped["exploit"] <= 0.70  # Cat-B ceiling for this state
 
-
-# ---- F3: stuck_lineage_roots mined-out arm -----------------------------------
 
 from trex.evidence_reducer import stuck_lineage_roots, ReducerConfig
 from trex.schemas import ResultRecord
@@ -166,8 +149,6 @@ def test_small_lineage_not_judged():
     assert "g1" not in {e["root_result_id"] for e in stuck_lineage_roots([g, *kids], ReducerConfig())}
 
 
-# ---- MPNN-rescue stuck-lineage (2026-06-13): traverse to refilter grandchild --
-
 def _failing_parent(rid, fam="complexa_beam"):
     # passes pLDDT + scRMSD, FAILS iPAE -> dominant deficit = iPAE
     return ResultRecord(
@@ -207,8 +188,7 @@ def test_mpnn_rescue_lineage_flagged_via_refilter_grandchild():
     roots = {e["root_result_id"]: e for e in stuck_lineage_roots(recs, ReducerConfig())}
     assert "p1" in roots
     assert roots["p1"]["dominant_axis"] == "iPAE"
-    # GAP 2: proteinmpnn had 3 (>=2) non-improving attempts on p1 -> exhausted;
-    # a DIFFERENT rescue family is NOT in the set (could still try p1).
+    # Only the attempted refinement family is exhausted.
     assert roots["p1"]["exhausted_families"] == ["proteinmpnn_redesign"]
 
 
@@ -220,8 +200,6 @@ def test_mpnn_rescue_lineage_not_flagged_when_grandchild_improves():
     roots = {e["root_result_id"] for e in stuck_lineage_roots(recs, ReducerConfig())}
     assert "p1" not in roots
 
-
-# ---- F5: deep_stall escalation + calibration ---------------------------------
 
 def _stall(**kw):
     base = dict(
@@ -241,9 +219,7 @@ def test_deep_stall_escalates_only_past_threshold():
 
 
 def test_deep_stall_calibration_never_fires_on_healthy_dry_plateaus():
-    # CALIBRATION GUARD: healthy runs' longest dry plateau was 8.0 worker-GPU-h
-    # (CD45 4.7 / HER2 8.0 / PDL1 2.3). The threshold (12.0) must sit ABOVE that,
-    # so no healthy plateau can escalate to deep_stall.
+    # The configured deep-stall threshold is 12 worker GPU-hours without a new SU.
     assert _CFG.deep_stall_gpu_h > 8.0
     for healthy_max_dry in (4.7, 8.0, 2.3):
         assert _stall(gpu_h_since_last_su=healthy_max_dry) == "stalled"
@@ -272,8 +248,7 @@ def _rescue(**kw):
 
 
 def test_R1_1_rescue_rich_escalates_to_deep_stall_only_when_very_dry():
-    # R1-1 fix: rescue_rich normally shadows deep_stall, but a near-miss-rich lane
-    # producing NO new SU until the normal deep-stall dry interval escalates.
+    # Near-miss evidence does not indefinitely suppress deep-stall detection.
     assert _rescue(gpu_h_since_last_su=5.0) == "rescue_rich"     # working slow rescue
     assert _rescue(gpu_h_since_last_su=11.9) == "rescue_rich"    # warning plateau, not yet hard-stale
     assert _rescue(gpu_h_since_last_su=12.0) == "deep_stall"     # stale rescue loses protection
@@ -282,9 +257,7 @@ def test_R1_1_rescue_rich_escalates_to_deep_stall_only_when_very_dry():
 
 
 def test_R1_2_parse_failed_appends_synthetic_resultrecord_with_gpuh():
-    # R1-2 fix: a parse-failed worker that ran meaningful GPU time must leave a
-    # synthetic ResultRecord (gpu_h>0, exit_status!='ok') so the dry timer counts
-    # it; without target_id it must NOT fabricate a record.
+    # Retain compute after parsing failure when a target is known.
     import time as _time
     from trex.controller import (
         _append_parse_failed_dispatch_record, _WorkerSlot,
@@ -319,7 +292,6 @@ def test_R1_2_parse_failed_appends_synthetic_resultrecord_with_gpuh():
     arc2 = _Arc()
     _append_parse_failed_dispatch_record(arc2, slot, "boom")
     assert arc2.iter_records(ResultRecord) == []
-
 
 
 def test_incremental_bindcraft_completion_does_not_false_parse_fail(monkeypatch, tmp_path):
@@ -380,8 +352,6 @@ def test_deep_stall_preserves_confident_llm_mixture():
     assert c["explore"] >= 0.35 and abs(sum(c.values()) - 1.0) < 1e-9
 
 
-# ---- F4 throttle + F1 round-robin (controller helpers) -----------------------
-
 from trex.controller import (
     _queue_chain_refilter_reserve, _chain_backfill_ids,
     _cancel_pending_chain_reserves_for_deep_stall,
@@ -426,16 +396,12 @@ def test_throttle_suppresses_reserve_on_deep_stall():
 
 
 def test_throttle_reads_state_from_run_live_tick_dict():
-    # BLOCKER regression: run_live_tick returns a DICT with the state nested at
-    # summary["evidence"]["state_label"] (NOT an attribute). The controller's
-    # latest_state extraction must use dict-get, not getattr (which silently
-    # returned the default and made the whole deep_stall throttle a no-op).
+    # Read the state from the nested run_live_tick dictionary.
     summary = {"evidence": {"state_label": "deep_stall"}, "launches": []}
     latest_state = "stalled"
-    # the CORRECT pattern (what the controller now uses):
     latest_state = summary.get("evidence", {}).get("state_label", latest_state)
     assert latest_state == "deep_stall"
-    # the BUGGY pattern would have left it unchanged:
+    # Attribute lookup cannot read the nested state.
     assert getattr(summary, "state_label", "stalled") == "stalled"
 
 
@@ -470,8 +436,7 @@ def test_current_tick_deep_stall_cancels_queued_reserve_before_dispatch():
 
 
 def test_backfill_round_robin_does_not_let_one_lineage_monopolize():
-    # 10 mpnn + 1 bindcraft + 1 boltzgen chain refilters; pick 3 should SPAN
-    # families, not be 3x mpnn (the CbAgo monopolization the round-robin fixes).
+    # Selecting three evaluations from a mixed backlog should cover all three source families.
     recs = [_chain_cand("proteinmpnn_redesign", i) for i in range(10)]
     recs += [_chain_cand("bindcraft", 0), _chain_cand("boltzgen", 0)]
     arch = _FakeArchive(recs)

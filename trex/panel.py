@@ -1,7 +1,7 @@
-"""Greedy Pareto panel selection + PanelValue@K.
+"""Greedy Pareto panel selection and PanelValue@K.
 
-Pure function. See plan §13. `eps_quality_lift` is the minimum quality
-improvement required for a redundant-bin candidate to earn dweight=0.3.
+eps_quality_lift controls the minimum quality gain for partial credit within a redundant
+bin.
 """
 
 from __future__ import annotations
@@ -166,12 +166,7 @@ def production_bins(candidate: ResultRecord) -> dict[str, str]:
         "structure": (
             b.get("foldseek_su") or b.get("refilter_source") or candidate.result_id
         ),
-        # registry-002 (2026-06-18): every strict SU is on a structure_refilter
-        # record (only the AF2 refilter parser writes the canonical strict keys),
-        # so candidate.backend_family is ALWAYS "structure_refilter" here — that
-        # collapsed the family-diversity bin to a single value, neutering the panel
-        # tie-break and the family-diversity number reported to the LLM. Use the
-        # generating family (refilter_source_family), as the reducer already does.
+        # Resolve the generating family so evaluation records preserve family diversity.
         "family": b.get("refilter_source_family") or candidate.backend_family,
     }
     seq_bin = b.get("sequence_su") or b.get("sequence") or b.get("seq")
@@ -188,6 +183,8 @@ def _hard_gate_failure(
 ) -> str | None:
     if candidate.exit_status != "ok":
         return f"exit_status:{candidate.exit_status}"
+    if candidate.bins.get("output_chain_identity") == "unresolved":
+        return "unresolved_output_chain_identity"
     if not is_strict_success(candidate.metrics):
         return "not_strict_success"
     if cfg.require_structure_artifact and not _has_structure_artifact(candidate):
@@ -321,6 +318,7 @@ def best_near_miss_backups(
         for r in pool
         if r.exit_status == "ok"
         and is_near_miss(r.metrics)
+        and r.bins.get("output_chain_identity") != "unresolved"
         and (not require_structure_artifact or _has_structure_artifact(r))
     ]
     cands.sort(key=lambda r: (-production_quality(r), r.result_id))

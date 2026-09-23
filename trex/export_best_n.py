@@ -31,6 +31,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .archive import Archive
+from .output_identity import prepare_archive_results
 from .foldseek_clusterer import apply_clusters_to_bins, cluster_archive_pdbs
 from .panel import _has_structure_artifact, production_bins, production_quality
 from .schemas import ResultRecord
@@ -56,6 +57,9 @@ _MANIFEST_FIELD_ORDER = (
     *_DIAGNOSTIC_AXES,
     "structure_bin",
     "sequence_bin",
+    "binder_chain",
+    "target_chains",
+    "output_chain_identity",
     "src_pdb",
     "dst_pdb",
 )
@@ -192,14 +196,15 @@ def export_best_n(
             raise ValueError(f"{name} must be in (0, 1]")
     out_dir = _validate_output_directory(out_dir, overwrite=overwrite)
 
-    results = [
-        r for r in archive.iter_records(ResultRecord) if r.target_id == target_id
-    ]
+    results = prepare_archive_results(
+        (r for r in archive.iter_records(ResultRecord) if r.target_id == target_id), archive.root,
+    )
     strict = [
         r
         for r in results
         if r.exit_status == "ok"
         and is_strict_success(r.metrics)
+        and r.bins.get("output_chain_identity") != "unresolved"
         and (not require_structure_artifact or _has_structure_artifact(r))
     ]
 
@@ -207,6 +212,7 @@ def export_best_n(
         "target_id": target_id,
         "n_results": len(results),
         "n_strict_with_structure": len(strict),
+        "n_unresolved_output_identity": sum(r.bins.get("output_chain_identity") == "unresolved" for r in results),
         "foldseek_su_status": "disabled",
         "sequence_dedup_status": "disabled",
     }
@@ -271,6 +277,9 @@ def export_best_n(
             "production_quality": round(production_quality(rec), 6),
             "structure_bin": bins["structure"],
             "sequence_bin": bins.get("sequence", ""),
+            "binder_chain": rec.artifacts.get("binder_chain", ""),
+            "target_chains": rec.artifacts.get("target_chains", ""),
+            "output_chain_identity": rec.bins.get("output_chain_identity", "legacy_unverified"),
             "src_pdb": src,
             "dst_pdb": str(dst) if (copy_pdbs and src) else "",
         }
@@ -343,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--overwrite",
         action="store_true",
-        help="replace only a prior T-ReX export; reject unrelated files",
+        help="replace only a prior T-REX export; reject unrelated files",
     )
     args = p.parse_args(argv)
 

@@ -109,7 +109,6 @@ def test_builder_clamps_numeric_overshoot_instead_of_dropping_family_choice():
     assert cands[0].feasibility.all_ok()
 
 
-
 def test_partial_validator_clamps_numeric_to_nearest_bound():
     cap = default_registry().get("complexa_best_of_n")
     kept, dropped = validate_config_delta_partial(cap, {"replicas": 999})
@@ -148,16 +147,13 @@ def test_builder_drops_unknown_family_suggestions():
     h = _hyp({"some_other_family": {"x": 1}})
     cands = build_candidates([h], _evidence())
     assert cands
-    # the unknown family's key must not leak onto complexa_beam (the original
-    # contract); rec 3 may add an axis-matched soft-default since the LLM gave
-    # complexa_beam no config of its own.
+    # Unknown-family settings must not leak into another family. Missing settings
+    # can still receive that family's axis-matched default.
     assert "x" not in cands[0].config_delta
 
 
 def test_builder_no_suggestions_still_works():
-    # rec 3 (2026-05-30): with NO LLM config on an iPAE-diagnosed complexa_beam
-    # hypothesis, the builder seeds the axis-matched soft-default (interface
-    # blocker -> raise backbone noise). Still produces exactly one candidate.
+    # An interface hypothesis without supplied settings receives the configured default.
     h = _hyp(None)
     cands = build_candidates([h], _evidence())
     assert cands
@@ -224,9 +220,6 @@ def test_v73_sparse_complexa_reward_with_material_knob_defers_reward():
     assert "n_branch" not in cfg
 
 
-# ---- llm-002 (2026-06-18): budget repair shrinks WIDTH before DEPTH ----
-
-
 def test_repair_shrinks_width_not_depth_and_never_injects_omitted_nsteps():
     """An over-budget complexa_beam config that over-asks WIDTH (beam_width) but
     omits nsteps must be repaired by cutting beam_width — NOT by injecting/cutting
@@ -263,9 +256,6 @@ def test_default_complexa_budget_matches_executor_400_steps():
     matches what actually runs: 400*4*4*4 = 25600."""
     from trex.capability_registry import compute_eval_budget
     assert compute_eval_budget("complexa_beam", {}) == 25_600
-
-
-# ---- llm-004 (2026-06-18): wall gate scales by config_delta budget ----
 
 
 def test_scaled_wall_reason_flags_heavy_config_near_end_of_run():

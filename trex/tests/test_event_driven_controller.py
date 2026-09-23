@@ -1,15 +1,5 @@
-"""Unit tests for the event-driven controller (2026-05-27 refactor).
-
-The new pool-based loop in `controller.main` replaces the
-prior round-bounded `wait_all` batch dispatch. Tests here pin down the
-slot lifecycle (`_WorkerSlot.busy/is_done/free`), the dispatch routing
-(`_dispatch_candidate_to_gpu` for each family branch), and the parse
-+ auto-chain side effects (`_parse_and_archive_slot`).
-
-A bounded integration test also drives `controller.main` through one complete
-probe -> plan -> drain iteration with external executables and sleeping replaced
-by deterministic test doubles. Live backend integration remains validated by
-SLURM observe-mode runs (see `docs/v7_observe_mode_runbook.md`).
+"""Test asynchronous worker lifecycle, dispatch, parsing, and chained evaluation with
+mocked external processes.
 """
 
 from __future__ import annotations
@@ -59,18 +49,29 @@ from trex.success_criteria import STRICT_SUCCESS
 
 def _feas() -> FeasibilityCheck:
     return FeasibilityCheck(
-        backend_healthy=True, runtime_bucket_id="rb_v7", compiler_ok=True,
-        verifier_ok=True, route_cap_ok=True, cost_ok=True,
+        backend_healthy=True,
+        runtime_bucket_id="rb_v7",
+        compiler_ok=True,
+        verifier_ok=True,
+        route_cap_ok=True,
+        cost_ok=True,
     )
 
 
 def _cand(family: str = "bindcraft", cid: str = "c1") -> ActionCandidate:
     return ActionCandidate(
-        candidate_id=cid, hypothesis_ids=["h1"], parent_result_id=None,
-        method_family=family, operator_id="op", lane_id=family,
-        config_delta={}, downstream_route_plan=[],
+        candidate_id=cid,
+        hypothesis_ids=["h1"],
+        parent_result_id=None,
+        method_family=family,
+        operator_id="op",
+        lane_id=family,
+        config_delta={},
+        downstream_route_plan=[],
         estimated_cost_class="standard",  # type: ignore[arg-type]
-        expected_signal="x", evidence_refs=["e1"], feasibility=_feas(),
+        expected_signal="x",
+        evidence_refs=["e1"],
+        feasibility=_feas(),
     )
 
 
@@ -78,28 +79,20 @@ def _target(tid: str = "t1") -> TargetConstraint:
     return TargetConstraint(target_id=tid, target_class="c")
 
 
-# Strict-success metrics drawn from §2.5 SSOT (no hardcoded magic).
 _PASS_METRICS = {
-    "pLDDT":         STRICT_SUCCESS["pLDDT"][0] + 2.0,
-    "iPAE":          STRICT_SUCCESS["iPAE"][0] - 0.05,
+    "pLDDT": STRICT_SUCCESS["pLDDT"][0] + 2.0,
+    "iPAE": STRICT_SUCCESS["iPAE"][0] - 0.05,
     "binder_scRMSD": STRICT_SUCCESS["binder_scRMSD"][0] - 0.3,
 }
 
 
-# ---------------------------------------------------------------------------
-# Sanity: FAMILY_TIMEOUT_S is at module level (was inline before §22.8.5)
-# ---------------------------------------------------------------------------
-
-
 def test_isolated_env_strips_cluster_cuda():
-    """§22.8.12: LD_LIBRARY_PATH must point ONLY to env_root/lib, not
-    inherit cluster CUDA which would override the wrapper's bundled
-    JAX-CUDA libs."""
+    """Backend library paths must exclude conflicting cluster CUDA libraries."""
     import os
     from pathlib import Path
     from trex.controller import _isolated_env_for_subprocess
 
-    # Simulate the SLURM env that T-ReX inherits after `module load foldseek`
+    # Simulate the SLURM env that T-REX inherits after `module load foldseek`
     os.environ["LD_LIBRARY_PATH"] = "/usr/local/cuda-12.8/lib64:/something/else"
     env = _isolated_env_for_subprocess(Path("/scratch/bc_env"))
     try:
@@ -132,12 +125,26 @@ def test_controller_long_backoff_requires_all_workers_idle():
     busy.cand = _cand()
     busy.proc = MagicMock()
 
-    assert _controller_sleep_seconds(
-        dispatched=0, planned=0, pending=[], pool=[idle], poll_interval_s=5,
-    ) == 120
-    assert _controller_sleep_seconds(
-        dispatched=0, planned=0, pending=[], pool=[idle, busy], poll_interval_s=5,
-    ) == 5
+    assert (
+        _controller_sleep_seconds(
+            dispatched=0,
+            planned=0,
+            pending=[],
+            pool=[idle],
+            poll_interval_s=5,
+        )
+        == 120
+    )
+    assert (
+        _controller_sleep_seconds(
+            dispatched=0,
+            planned=0,
+            pending=[],
+            pool=[idle, busy],
+            poll_interval_s=5,
+        )
+        == 5
+    )
 
 
 def test_production_loop_has_no_iteration_cap_or_default_evidence_skip():
@@ -165,11 +172,10 @@ def test_p2_runtime_preflight_uses_exact_configured_interpreter(tmp_path: Path):
         complexa_python=python,
     )
 
-    with (
-        patch.object(controller.subprocess, "run", return_value=completed) as run,
-    ):
+    with (patch.object(controller.subprocess, "run", return_value=completed) as run,):
         output = _require_p2_runtime_available(
-            require_af2=True, require_proteinmpnn=True,
+            require_af2=True,
+            require_proteinmpnn=True,
             runtime_paths=runtime_paths,
         )
 
@@ -200,7 +206,8 @@ def test_p2_runtime_preflight_fails_on_import_error(tmp_path: Path):
         pytest.raises(SystemExit, match="runtime preflight exited 1"),
     ):
         _require_p2_runtime_available(
-            require_af2=False, require_proteinmpnn=True,
+            require_af2=False,
+            require_proteinmpnn=True,
             runtime_paths=runtime_paths,
         )
 
@@ -225,18 +232,22 @@ def test_runtime_paths_configure_foldseek_and_mmseqs_commands(
 def test_family_timeout_table_covers_all_dispatch_families():
     """Every method_family the controller can dispatch has a timeout."""
     required = {
-        "bindcraft", "complexa_beam", "complexa_best_of_n",
-        "complexa_fk_steering", "complexa_mcts",
-        "structure_refilter", "proteinmpnn_redesign",
+        "bindcraft",
+        "complexa_beam",
+        "complexa_best_of_n",
+        "complexa_fk_steering",
+        "complexa_mcts",
+        "structure_refilter",
+        "proteinmpnn_redesign",
         "boltzgen",
     }
-    assert required.issubset(set(FAMILY_TIMEOUT_S)), (
-        f"missing: {required - set(FAMILY_TIMEOUT_S)}"
-    )
+    assert required.issubset(
+        set(FAMILY_TIMEOUT_S)
+    ), f"missing: {required - set(FAMILY_TIMEOUT_S)}"
 
 
 def test_lengths_per_target_known_targets():
-    """The three calibrated targets used in v7_per_target_node.slurm."""
+    """Registered targets have generation-length defaults."""
     assert "05_CD45" in LENGTHS_PER_TARGET
     assert "23_BetV1" in LENGTHS_PER_TARGET
     assert "30_SC2RBD" in LENGTHS_PER_TARGET
@@ -303,8 +314,13 @@ def test_dispatch_returns_none_for_unknown_family(tmp_path: Path):
     arc = Archive(tmp_path)
     cand = _cand(family="rfdiffusion")  # not in dispatch tree
     out = _dispatch_candidate_to_gpu(
-        cand, gpu_id="1", archive=arc, target=_target(),
-        target_pdb="/tmp/none.pdb", round_id=1, archive_root=tmp_path,
+        cand,
+        gpu_id="1",
+        archive=arc,
+        target=_target(),
+        target_pdb="/tmp/none.pdb",
+        round_id=1,
+        archive_root=tmp_path,
     )
     assert out is None
 
@@ -319,11 +335,23 @@ def test_dispatch_bindcraft_calls_bindcraft_async(tmp_path: Path):
         return_value=(fake_proc, fake_out),
     ) as mock_bc:
         out = _dispatch_candidate_to_gpu(
-            cand, gpu_id="2", archive=arc, target=_target(),
-            target_pdb="/tmp/target.pdb", round_id=5, archive_root=tmp_path,
+            cand,
+            gpu_id="2",
+            archive=arc,
+            target=_target(),
+            target_pdb="/tmp/target.pdb",
+            round_id=5,
+            archive_root=tmp_path,
         )
     assert out is not None
-    proc, out_dir, parent_pdb_str, parent_result_id, target_chains_csv, binder_chain = out
+    (
+        proc,
+        out_dir,
+        parent_pdb_str,
+        parent_result_id,
+        target_chains_csv,
+        binder_chain,
+    ) = out
     assert proc is fake_proc
     assert out_dir == fake_out
     assert parent_pdb_str == ""  # bindcraft is not chained
@@ -341,8 +369,13 @@ def test_dispatch_structure_refilter_skips_when_no_parent_pdb(tmp_path: Path):
     cand = _cand(family="structure_refilter")
     # No ResultRecord in archive, so _resolve_parent_artifact returns None.
     out = _dispatch_candidate_to_gpu(
-        cand, gpu_id="1", archive=arc, target=_target(),
-        target_pdb="/tmp/target.pdb", round_id=1, archive_root=tmp_path,
+        cand,
+        gpu_id="1",
+        archive=arc,
+        target=_target(),
+        target_pdb="/tmp/target.pdb",
+        round_id=1,
+        archive_root=tmp_path,
     )
     assert out is None
 
@@ -423,36 +456,40 @@ def test_explicit_parent_missing_artifact_does_not_fallback_to_best_pdb(tmp_path
     best_pdb.write_text(
         "ATOM      1  CA  ALA B   1       0.000   0.000   0.000  1.00  0.00           C\n"
     )
-    arc.append(ResultRecord(
-        result_id="missing_artifact_parent",
-        parent_ids=[],
-        target_id="t1",
-        backend_family="bindcraft",
-        runtime_bucket_id="rb_v7",
-        metrics={"pLDDT": 91.0},
-        metrics_calibrated={},
-        route_lineage=[],
-        gpu_h=1.0,
-        exit_status="ok",  # type: ignore[arg-type]
-        bins={},
-        artifacts={},
-        panel_ready=False,
-    ))
-    arc.append(ResultRecord(
-        result_id="best_unrelated",
-        parent_ids=[],
-        target_id="t1",
-        backend_family="complexa_beam",
-        runtime_bucket_id="rb_v7",
-        metrics={"pLDDT": 99.0},
-        metrics_calibrated={},
-        route_lineage=[],
-        gpu_h=0.1,
-        exit_status="ok",  # type: ignore[arg-type]
-        bins={},
-        artifacts={"pdb_path": str(best_pdb)},
-        panel_ready=False,
-    ))
+    arc.append(
+        ResultRecord(
+            result_id="missing_artifact_parent",
+            parent_ids=[],
+            target_id="t1",
+            backend_family="bindcraft",
+            runtime_bucket_id="rb_v7",
+            metrics={"pLDDT": 91.0},
+            metrics_calibrated={},
+            route_lineage=[],
+            gpu_h=1.0,
+            exit_status="ok",  # type: ignore[arg-type]
+            bins={},
+            artifacts={},
+            panel_ready=False,
+        )
+    )
+    arc.append(
+        ResultRecord(
+            result_id="best_unrelated",
+            parent_ids=[],
+            target_id="t1",
+            backend_family="complexa_beam",
+            runtime_bucket_id="rb_v7",
+            metrics={"pLDDT": 99.0},
+            metrics_calibrated={},
+            route_lineage=[],
+            gpu_h=0.1,
+            exit_status="ok",  # type: ignore[arg-type]
+            bins={},
+            artifacts={"pdb_path": str(best_pdb)},
+            panel_ready=False,
+        )
+    )
     cand = _cand(family="structure_refilter")
     cand = dataclasses.replace(cand, parent_result_id="missing_artifact_parent")
     assert _resolve_parent_artifact(arc, cand) is None
@@ -461,7 +498,9 @@ def test_explicit_parent_missing_artifact_does_not_fallback_to_best_pdb(tmp_path
 @pytest.mark.parametrize("archive_name", ["first_run", "relocated_run"])
 @pytest.mark.parametrize("candidate_id", ["cmplx_001", "nested/cmplx_001"])
 def test_dispatch_complexa_preserves_historical_seed_input(
-    tmp_path: Path, archive_name: str, candidate_id: str,
+    tmp_path: Path,
+    archive_name: str,
+    candidate_id: str,
 ):
     archive_root = tmp_path / archive_name
     arc = Archive(archive_root)
@@ -473,8 +512,13 @@ def test_dispatch_complexa_preserves_historical_seed_input(
         return_value=(fake_proc, fake_out),
     ) as mock_c:
         out = _dispatch_candidate_to_gpu(
-            cand, gpu_id="3", archive=arc, target=_target(),
-            target_pdb="/tmp/target.pdb", round_id=7, archive_root=archive_root,
+            cand,
+            gpu_id="3",
+            archive=arc,
+            target=_target(),
+            target_pdb="/tmp/target.pdb",
+            round_id=7,
+            archive_root=archive_root,
         )
     assert out is not None
     args = mock_c.call_args
@@ -482,6 +526,9 @@ def test_dispatch_complexa_preserves_historical_seed_input(
     # run_name is part of the seed hash, not merely an output-directory label.
     # Moving an archive must not change the historical per-launch seed input.
     assert args.args[3] == f"v7_r007_{candidate_id.replace('/', '_')}"
+    output_namespace = args.kwargs["output_namespace"]
+    assert len(output_namespace) == 12
+    assert all(character in "0123456789abcdef" for character in output_namespace)
 
 
 # ---------------------------------------------------------------------------
@@ -493,7 +540,10 @@ def test_parse_and_archive_returns_zero_for_empty_slot(tmp_path: Path):
     arc = Archive(tmp_path)
     slot = _WorkerSlot(slot_id=0, gpu_id="1")  # no cand, no out_dir
     n = _parse_and_archive_slot(
-        slot, rc=0, archive=arc, target=_target(),
+        slot,
+        rc=0,
+        archive=arc,
+        target=_target(),
         chain_seq_ref=[0],
     )
     assert n == 0
@@ -510,11 +560,19 @@ def test_parse_and_archive_appends_records_from_parser(tmp_path: Path):
 
     fake_records = [
         ResultRecord(
-            result_id="r_001", parent_ids=["c1"], target_id="t1",
-            backend_family="bindcraft", runtime_bucket_id="rb_v7",
-            metrics=dict(_PASS_METRICS), metrics_calibrated={},
-            route_lineage=[], gpu_h=1.0, exit_status="ok",  # type: ignore[arg-type]
-            bins={"design": "d1"}, artifacts={}, panel_ready=False,
+            result_id="r_001",
+            parent_ids=["c1"],
+            target_id="t1",
+            backend_family="bindcraft",
+            runtime_bucket_id="rb_v7",
+            metrics=dict(_PASS_METRICS),
+            metrics_calibrated={},
+            route_lineage=[],
+            gpu_h=1.0,
+            exit_status="ok",  # type: ignore[arg-type]
+            bins={"design": "d1"},
+            artifacts={},
+            panel_ready=False,
         ),
     ]
     with patch(
@@ -522,7 +580,10 @@ def test_parse_and_archive_appends_records_from_parser(tmp_path: Path):
         return_value=fake_records,
     ):
         n = _parse_and_archive_slot(
-            slot, rc=0, archive=arc, target=_target(),
+            slot,
+            rc=0,
+            archive=arc,
+            target=_target(),
             chain_seq_ref=[0],
         )
     assert n == 1
@@ -532,8 +593,7 @@ def test_parse_and_archive_appends_records_from_parser(tmp_path: Path):
 
 
 def test_parse_and_archive_resilient_on_nonzero_rc(tmp_path: Path):
-    """rc != 0 still attempts parse (fix22 behavior): BoltzGen exits 1
-    even on full pipeline success."""
+    """Attempt to recover usable outputs after a nonzero exit."""
     arc = Archive(tmp_path)
     cand = _cand(family="boltzgen")
     slot = _WorkerSlot(slot_id=0, gpu_id="1")
@@ -543,11 +603,19 @@ def test_parse_and_archive_resilient_on_nonzero_rc(tmp_path: Path):
 
     fake_records = [
         ResultRecord(
-            result_id="r_bg", parent_ids=["c1"], target_id="t1",
-            backend_family="boltzgen", runtime_bucket_id="rb_v7",
-            metrics=dict(_PASS_METRICS), metrics_calibrated={},
-            route_lineage=[], gpu_h=1.0, exit_status="ok",  # type: ignore[arg-type]
-            bins={"boltzgen_design_iptm": "0.85"}, artifacts={}, panel_ready=False,
+            result_id="r_bg",
+            parent_ids=["c1"],
+            target_id="t1",
+            backend_family="boltzgen",
+            runtime_bucket_id="rb_v7",
+            metrics=dict(_PASS_METRICS),
+            metrics_calibrated={},
+            route_lineage=[],
+            gpu_h=1.0,
+            exit_status="ok",  # type: ignore[arg-type]
+            bins={"boltzgen_design_iptm": "0.85"},
+            artifacts={},
+            panel_ready=False,
         ),
     ]
     with patch(
@@ -555,8 +623,11 @@ def test_parse_and_archive_resilient_on_nonzero_rc(tmp_path: Path):
         return_value=fake_records,
     ):
         n = _parse_and_archive_slot(
-            slot, rc=1,  # non-zero
-            archive=arc, target=_target(), chain_seq_ref=[0],
+            slot,
+            rc=1,  # non-zero
+            archive=arc,
+            target=_target(),
+            chain_seq_ref=[0],
         )
     assert n == 1
 
@@ -564,6 +635,7 @@ def test_parse_and_archive_resilient_on_nonzero_rc(tmp_path: Path):
 def test_parse_and_archive_handles_parse_error(tmp_path: Path):
     """ParseError → 0 records, slot still freeable. No archive write."""
     from trex.output_parsers import ParseError
+
     arc = Archive(tmp_path)
     cand = _cand(family="bindcraft")
     slot = _WorkerSlot(slot_id=0, gpu_id="1")
@@ -576,7 +648,10 @@ def test_parse_and_archive_handles_parse_error(tmp_path: Path):
         side_effect=ParseError("bad outputs"),
     ):
         n = _parse_and_archive_slot(
-            slot, rc=0, archive=arc, target=_target(),
+            slot,
+            rc=0,
+            archive=arc,
+            target=_target(),
             chain_seq_ref=[0],
         )
     assert n == 0
@@ -584,12 +659,9 @@ def test_parse_and_archive_handles_parse_error(tmp_path: Path):
 
 
 def test_parse_emits_synthetic_record_when_zero_records_and_elapsed(tmp_path: Path):
-    """§22.8.8: when parser returns 0 records but elapsed_gpu_h >= 0.05,
-    emit a synthetic ResultRecord so method_health.cumulative_gpu_h tracks
-    actual time spent. Without this, BindCraft killed at 90min before any
-    design passed filters shows cumulative_gpu_h=0 → LLM mis-reads as
-    'under-explored' → infinite retry."""
+    """Record compute for an empty parsed output after meaningful execution."""
     from trex.output_parsers import ParseError
+
     arc = Archive(tmp_path)
     cand = _cand(family="bindcraft", cid="c_synth")
     slot = _WorkerSlot(slot_id=0, gpu_id="1")
@@ -602,7 +674,10 @@ def test_parse_emits_synthetic_record_when_zero_records_and_elapsed(tmp_path: Pa
         return_value=[],  # zero records (BindCraft killed before any design accepted)
     ):
         n = _parse_and_archive_slot(
-            slot, rc=-1, archive=arc, target=_target(),
+            slot,
+            rc=-1,
+            archive=arc,
+            target=_target(),
             chain_seq_ref=[0],
             elapsed_gpu_h=1.5,  # 90 min spent
         )
@@ -618,10 +693,7 @@ def test_parse_emits_synthetic_record_when_zero_records_and_elapsed(tmp_path: Pa
 
 
 def test_parse_no_synthetic_when_elapsed_too_short(tmp_path: Path):
-    """Below 0.005h (18s) threshold: skip synthetic record (dispatch
-    noise — never reached worker startup). §22.8.11 lowered the
-    threshold from 0.05h to 0.005h after observing BindCraft segfaults
-    at 36s (0.01h) that need to be tracked, not silently dropped."""
+    """Ignore a brief successful empty result below the dispatch-noise threshold."""
     arc = Archive(tmp_path)
     cand = _cand(family="bindcraft", cid="c_quick")
     slot = _WorkerSlot(slot_id=0, gpu_id="1")
@@ -633,7 +705,10 @@ def test_parse_no_synthetic_when_elapsed_too_short(tmp_path: Path):
         return_value=[],
     ):
         _parse_and_archive_slot(
-            slot, rc=0, archive=arc, target=_target(),
+            slot,
+            rc=0,
+            archive=arc,
+            target=_target(),
             chain_seq_ref=[0],
             elapsed_gpu_h=0.002,  # 7s — below 18s threshold (dispatch noise)
         )
@@ -641,10 +716,7 @@ def test_parse_no_synthetic_when_elapsed_too_short(tmp_path: Path):
 
 
 def test_parse_synthetic_captures_fast_crash(tmp_path: Path):
-    """§22.8.11: BindCraft segfault at 36s (0.01h) DOES emit synth record
-    now (it would not under the old 0.05h threshold). This is how the LLM
-    learns that 'BindCraft is crashing on SC2RBD' instead of treating it
-    as 'under-explored, give more budget'."""
+    """Record short failed executions even when they produced no designs."""
     arc = Archive(tmp_path)
     cand = _cand(family="bindcraft", cid="c_segfault")
     slot = _WorkerSlot(slot_id=0, gpu_id="1")
@@ -656,7 +728,10 @@ def test_parse_synthetic_captures_fast_crash(tmp_path: Path):
         return_value=[],
     ):
         _parse_and_archive_slot(
-            slot, rc=-11, archive=arc, target=_target(),  # -11 = SIGSEGV
+            slot,
+            rc=-11,
+            archive=arc,
+            target=_target(),  # -11 = SIGSEGV
             chain_seq_ref=[0],
             elapsed_gpu_h=0.01,  # 36s
         )
@@ -680,7 +755,11 @@ def test_parse_synthetic_captures_import_crash_below_gpu_threshold(tmp_path: Pat
         return_value=[],
     ):
         _parse_and_archive_slot(
-            slot, rc=1, archive=arc, target=_target(), chain_seq_ref=[0],
+            slot,
+            rc=1,
+            archive=arc,
+            target=_target(),
+            chain_seq_ref=[0],
             elapsed_gpu_h=0.001,
         )
     stored = list(arc.iter_records(ResultRecord))
@@ -699,18 +778,29 @@ def test_parse_no_synthetic_when_real_records_returned(tmp_path: Path):
     slot.out_dir = tmp_path
     slot.tick_id = "v7r052"
     real_rec = ResultRecord(
-        result_id="r_real", parent_ids=["c_ok"], target_id="t1",
-        backend_family="bindcraft", runtime_bucket_id="rb_v7",
-        metrics=dict(_PASS_METRICS), metrics_calibrated={},
-        route_lineage=[], gpu_h=0.05, exit_status="ok",  # type: ignore[arg-type]
-        bins={"design": "d1"}, artifacts={}, panel_ready=False,
+        result_id="r_real",
+        parent_ids=["c_ok"],
+        target_id="t1",
+        backend_family="bindcraft",
+        runtime_bucket_id="rb_v7",
+        metrics=dict(_PASS_METRICS),
+        metrics_calibrated={},
+        route_lineage=[],
+        gpu_h=0.05,
+        exit_status="ok",  # type: ignore[arg-type]
+        bins={"design": "d1"},
+        artifacts={},
+        panel_ready=False,
     )
     with patch(
         "trex.controller.parse_bindcraft_output",
         return_value=[real_rec],
     ):
         _parse_and_archive_slot(
-            slot, rc=0, archive=arc, target=_target(),
+            slot,
+            rc=0,
+            archive=arc,
+            target=_target(),
             chain_seq_ref=[0],
             elapsed_gpu_h=1.5,
         )
@@ -721,11 +811,7 @@ def test_parse_no_synthetic_when_real_records_returned(tmp_path: Path):
 
 
 def test_parse_normalizes_per_record_gpu_h_to_elapsed(tmp_path: Path):
-    """§22.8.9: per-parser gpu_h CONSTANTS get rescaled so sum across this
-    launch's records = elapsed_gpu_h (actual wall time). Without this fix,
-    a complexa_best_of_n launch with replicas=32 × COMPLEXA_GPU_H_PER_FINAL=0.5
-    would report 16 GPU-h vs ~0.5 actual — 32x inflation → method_health
-    mis-reports cumulative_gpu_h, breaks family-under-exploration rule."""
+    """Distribute elapsed job compute across its parsed records without inflation."""
     arc = Archive(tmp_path)
     cand = _cand(family="complexa_best_of_n", cid="c_replica")
     slot = _WorkerSlot(slot_id=0, gpu_id="1")
@@ -736,11 +822,19 @@ def test_parse_normalizes_per_record_gpu_h_to_elapsed(tmp_path: Path):
     # Parser emits 4 records each with gpu_h=0.5 (would sum to 2.0 inflated)
     fake_records = [
         ResultRecord(
-            result_id=f"r_{i}", parent_ids=["c_replica"], target_id="t1",
-            backend_family="complexa_best_of_n", runtime_bucket_id="rb_v7",
-            metrics=dict(_PASS_METRICS), metrics_calibrated={},
-            route_lineage=[], gpu_h=0.5, exit_status="ok",  # type: ignore[arg-type]
-            bins={"sample_index": str(i)}, artifacts={}, panel_ready=False,
+            result_id=f"r_{i}",
+            parent_ids=["c_replica"],
+            target_id="t1",
+            backend_family="complexa_best_of_n",
+            runtime_bucket_id="rb_v7",
+            metrics=dict(_PASS_METRICS),
+            metrics_calibrated={},
+            route_lineage=[],
+            gpu_h=0.5,
+            exit_status="ok",  # type: ignore[arg-type]
+            bins={"sample_index": str(i)},
+            artifacts={},
+            panel_ready=False,
         )
         for i in range(4)
     ]
@@ -749,7 +843,10 @@ def test_parse_normalizes_per_record_gpu_h_to_elapsed(tmp_path: Path):
         return_value=fake_records,
     ):
         n = _parse_and_archive_slot(
-            slot, rc=0, archive=arc, target=_target(),
+            slot,
+            rc=0,
+            archive=arc,
+            target=_target(),
             chain_seq_ref=[0],
             elapsed_gpu_h=0.4,  # actual wall time: 24 min ≈ 0.4 GPU-h
         )
@@ -774,11 +871,19 @@ def test_parse_skips_gpu_h_rewrite_when_elapsed_zero(tmp_path: Path):
     slot.tick_id = "v7r081"
     fake = [
         ResultRecord(
-            result_id="r_x", parent_ids=["c_nl"], target_id="t1",
-            backend_family="complexa_beam", runtime_bucket_id="rb_v7",
-            metrics=dict(_PASS_METRICS), metrics_calibrated={},
-            route_lineage=[], gpu_h=0.5, exit_status="ok",  # type: ignore[arg-type]
-            bins={}, artifacts={}, panel_ready=False,
+            result_id="r_x",
+            parent_ids=["c_nl"],
+            target_id="t1",
+            backend_family="complexa_beam",
+            runtime_bucket_id="rb_v7",
+            metrics=dict(_PASS_METRICS),
+            metrics_calibrated={},
+            route_lineage=[],
+            gpu_h=0.5,
+            exit_status="ok",  # type: ignore[arg-type]
+            bins={},
+            artifacts={},
+            panel_ready=False,
         ),
     ]
     with patch(
@@ -786,8 +891,12 @@ def test_parse_skips_gpu_h_rewrite_when_elapsed_zero(tmp_path: Path):
         return_value=fake,
     ):
         _parse_and_archive_slot(
-            slot, rc=0, archive=arc, target=_target(),
-            chain_seq_ref=[0], elapsed_gpu_h=0.0,
+            slot,
+            rc=0,
+            archive=arc,
+            target=_target(),
+            chain_seq_ref=[0],
+            elapsed_gpu_h=0.0,
         )
     stored = list(arc.iter_records(ResultRecord))
     assert stored[0].gpu_h == 0.5  # unchanged
@@ -808,8 +917,12 @@ def test_parse_synthetic_exit_status_distinguishes_timeout_from_nonzero(tmp_path
         return_value=[],
     ):
         _parse_and_archive_slot(
-            slot, rc=-1, archive=arc, target=_target(),
-            chain_seq_ref=[0], elapsed_gpu_h=1.5,
+            slot,
+            rc=-1,
+            archive=arc,
+            target=_target(),
+            chain_seq_ref=[0],
+            elapsed_gpu_h=1.5,
         )
     assert list(arc.iter_records(ResultRecord))[0].exit_status == "timeout"
 
@@ -824,8 +937,12 @@ def test_parse_synthetic_exit_status_distinguishes_timeout_from_nonzero(tmp_path
         return_value=[],
     ):
         _parse_and_archive_slot(
-            slot2, rc=0, archive=arc2, target=_target(),
-            chain_seq_ref=[0], elapsed_gpu_h=1.5,
+            slot2,
+            rc=0,
+            archive=arc2,
+            target=_target(),
+            chain_seq_ref=[0],
+            elapsed_gpu_h=1.5,
         )
     assert list(arc2.iter_records(ResultRecord))[0].exit_status == "no_artifacts"
 
@@ -836,12 +953,18 @@ def test_chain_seq_increments_for_auto_chain_children(tmp_path: Path):
     arc = Archive(tmp_path)
     # diagnostic-only generator with a downstream plan
     cand = ActionCandidate(
-        candidate_id="bg_parent", hypothesis_ids=["h1"],
-        parent_result_id=None, method_family="boltzgen",
-        operator_id="op", lane_id="boltzgen", config_delta={},
+        candidate_id="bg_parent",
+        hypothesis_ids=["h1"],
+        parent_result_id=None,
+        method_family="boltzgen",
+        operator_id="op",
+        lane_id="boltzgen",
+        config_delta={},
         downstream_route_plan=["structure_refilter"],
         estimated_cost_class="standard",  # type: ignore[arg-type]
-        expected_signal="x", evidence_refs=["e1"], feasibility=_feas(),
+        expected_signal="x",
+        evidence_refs=["e1"],
+        feasibility=_feas(),
     )
     arc.append(cand)
     slot = _WorkerSlot(slot_id=0, gpu_id="1")
@@ -850,10 +973,16 @@ def test_chain_seq_increments_for_auto_chain_children(tmp_path: Path):
     slot.tick_id = "v7r003"
 
     rec = ResultRecord(
-        result_id="r_bg_001", parent_ids=["bg_parent"], target_id="t1",
-        backend_family="boltzgen", runtime_bucket_id="rb_v7",
-        metrics=dict(_PASS_METRICS), metrics_calibrated={},
-        route_lineage=[], gpu_h=1.0, exit_status="ok",  # type: ignore[arg-type]
+        result_id="r_bg_001",
+        parent_ids=["bg_parent"],
+        target_id="t1",
+        backend_family="boltzgen",
+        runtime_bucket_id="rb_v7",
+        metrics=dict(_PASS_METRICS),
+        metrics_calibrated={},
+        route_lineage=[],
+        gpu_h=1.0,
+        exit_status="ok",  # type: ignore[arg-type]
         bins={"boltzgen_design_iptm": "0.85"},
         artifacts={"pdb_path": str(tmp_path / "fake.pdb")},  # presence-only check
         panel_ready=False,
@@ -867,13 +996,17 @@ def test_chain_seq_increments_for_auto_chain_children(tmp_path: Path):
         return_value=[rec],
     ):
         _parse_and_archive_slot(
-            slot, rc=0, archive=arc, target=_target(),
+            slot,
+            rc=0,
+            archive=arc,
+            target=_target(),
             chain_seq_ref=chain_seq_ref,
         )
     # Counter incremented at least once; auto-chain child appended.
     assert chain_seq_ref[0] >= 1
     children = [
-        c for c in arc.iter_records(ActionCandidate)
+        c
+        for c in arc.iter_records(ActionCandidate)
         if c.candidate_id.startswith("chain_")
     ]
     # Auto-chain emission requires the registered family to be "available";
@@ -886,7 +1019,9 @@ def test_chain_seq_increments_for_auto_chain_children(tmp_path: Path):
 @pytest.mark.parametrize("maximum_iterations", [1, 3])
 @pytest.mark.parametrize("include_selector", [False, True])
 def test_controller_replans_and_waits_when_idle_without_new_results(
-    tmp_path: Path, maximum_iterations: int, include_selector: bool,
+    tmp_path: Path,
+    maximum_iterations: int,
+    include_selector: bool,
 ) -> None:
     """Preserve historical retries, including an empty completed selection.
 
@@ -905,9 +1040,8 @@ def test_controller_replans_and_waits_when_idle_without_new_results(
         "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  "
         "1.00 20.00           C\nTER\nEND\n"
     )
-    runtime_paths = RuntimePaths.from_environment(
-        {}, default_repo_root=tmp_path
-    )
+    runtime_paths = RuntimePaths.from_environment({}, default_repo_root=tmp_path)
+
     def tick_result(*args, **kwargs):
         result = {
             "evidence": {
@@ -919,6 +1053,7 @@ def test_controller_replans_and_waits_when_idle_without_new_results(
         if include_selector and not kwargs.get("evidence_only", False):
             result["selector"] = {"launched": 0}
         return result
+
     checkpoint = ProgressCheckpointResult(
         last_checkpoint_at=0.0,
         latest_state=None,
@@ -931,15 +1066,23 @@ def test_controller_replans_and_waits_when_idle_without_new_results(
         controller, "run_live_tick", side_effect=tick_result
     ) as live_tick, patch.object(
         controller, "refresh_progress_checkpoint", return_value=checkpoint
-    ), patch.object(controller.time, "sleep") as sleep:
+    ), patch.object(
+        controller.time, "sleep"
+    ) as sleep:
         controller.main(
             [
-                "--archive-root", str(archive_root),
-                "--target-constraint", str(constraint_path),
-                "--target-pdb", str(target_pdb),
-                "--enabled-families", "complexa_beam",
-                "--worker-gpus", "1",
-                "--max-wall-h", "1",
+                "--archive-root",
+                str(archive_root),
+                "--target-constraint",
+                str(constraint_path),
+                "--target-pdb",
+                str(target_pdb),
+                "--enabled-families",
+                "complexa_beam",
+                "--worker-gpus",
+                "1",
+                "--max-wall-h",
+                "1",
             ],
             runtime_paths=runtime_paths,
             loop_config=ControllerLoopConfig(
@@ -953,7 +1096,8 @@ def test_controller_replans_and_waits_when_idle_without_new_results(
     assert live_tick.call_args_list[0].kwargs["evidence_only"] is True
     assert "evidence_only" not in live_tick.call_args_list[1].kwargs
     planning_calls = [
-        call for call in live_tick.call_args_list
+        call
+        for call in live_tick.call_args_list
         if not call.kwargs.get("evidence_only", False)
     ]
     assert [call.kwargs["tick_id"] for call in planning_calls] == [

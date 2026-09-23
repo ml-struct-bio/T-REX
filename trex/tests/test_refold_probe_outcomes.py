@@ -1,13 +1,5 @@
-"""#10 (2026-06-13): the parent_model_refold loop must close.
-
-An advisory refold writes refold_* (never the canonical strict keys) and links
-to its parent via bins["refilter_source"]. build_refold_probe_outcomes joins the
-two so the LLM can act on the answer:
-  - structure_limited: refold would pass the FIXED gate while the parent's
-    canonical score did not  -> regenerate/redesign that parent to mint SU.
-  - confirmed_limited: refold also fails -> the design itself is the problem.
-A probe on a parent that ALREADY passes canonical is redundant (ignored), and a
-record with no refold_* keys is not a probe.
+"""Tests joining advisory refolds to canonical parent measurements without granting SU
+credit.
 """
 
 from __future__ import annotations
@@ -80,12 +72,11 @@ def test_redundant_probe_on_passing_parent_ignored():
     assert out["probed"] == 1
     assert out["structure_limited"] == 0
     assert out["confirmed_limited"] == 0
-    assert out.get("parent_already_passes") == 1     # R2: counted so buckets sum
+    assert out.get("parent_already_passes") == 1
 
 
 def test_unjoined_when_parent_unresolvable():
-    """R1: refilter_source fell back to a basename/path (no result_id match) ->
-    unjoined, NOT structure_limited — we cannot prove the parent failed canonical."""
+    """An unresolved parent reference cannot establish a change in qualification."""
     refold = _refold("rf1", "some_basename.pdb", refold_pass=True)  # parent absent
     out = build_refold_probe_outcomes([refold], [refold])
     assert out["probed"] == 1
@@ -95,8 +86,7 @@ def test_unjoined_when_parent_unresolvable():
 
 
 def test_buckets_sum_to_probed():
-    """R2: probed == structure_limited + confirmed_limited + parent_already_passes
-    + unjoined (legible accounting for the LLM)."""
+    """Probe outcome categories must sum to the observed probe count."""
     recs = [
         _rec("pass_parent", metrics=_PASS),
         _rec("fail_parent", metrics=_FAIL_SCRMSD),
@@ -222,8 +212,7 @@ def test_negative_evidence_block_surfaces_zero_su_lane(tmp_path):
 
 
 def test_f1_strict_su_top_bin_share_needs_min_population(tmp_path):
-    """F1: a tiny strict-SU window (1-2 SU in one cluster) must NOT signal collapse
-    (share stays None); only at >= MIN_COUNT does the top-bin share fire."""
+    """Require enough observations before reporting structural concentration."""
     from unittest.mock import patch
     from trex.archive import Archive
     from trex.live_tick import LiveTickConfig, run_live_tick

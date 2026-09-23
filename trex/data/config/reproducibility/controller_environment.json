@@ -1,0 +1,30 @@
+{
+  "schema_version": "trex.controller-environment.v1",
+  "python": "3.12.13",
+  "platform": "linux",
+  "machine": "x86_64",
+  "lock": "config/trex/controller_requirements.lock.txt",
+  "lock_sha256": "7359a242ed192bd3ee59d7c249c060a6ef2c1f0b997a79387db2c6f0d44ef236",
+  "recorded_dependency_exceptions": [
+    {
+      "package": "compressed-tensors",
+      "requirement": "transformers<5.0.0",
+      "installed_version": "5.6.0.dev0"
+    },
+    {
+      "package": "mistral-common",
+      "requirement": "numpy<2.4,>=1.25; python_version <= \"3.12\"",
+      "installed_version": "2.4.4"
+    },
+    {
+      "package": "numba",
+      "requirement": "numpy<2.3,>=1.24",
+      "installed_version": "2.4.4"
+    },
+    {
+      "package": "vllm",
+      "requirement": "transformers<5,>=4.56.0",
+      "installed_version": "5.6.0.dev0"
+    }
+  ]
+}

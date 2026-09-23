@@ -1,8 +1,4 @@
-"""Regression: _windowed_quotas must not starve a small mode to EXACTLY 0 when
-two near-equal small shares tie. The fixed-index tiebreak made rescue beat
-explore on every tie, re-introducing the V6.3 "10% explore rounded to 0" failure
-(found by adversarial simulation, 2026-06-10). The rotating tiebreak fixes it.
-"""
+"""Test rotating quota tiebreaks so equal small shares do not permanently starve one mode."""
 from __future__ import annotations
 
 from trex.selector import _windowed_quotas
@@ -21,8 +17,7 @@ def _simulate(mixture, ticks=300, k=10):
 
 
 def test_small_equal_shares_do_not_starve_explore():
-    # exploit dominates; rescue and explore share an equal small 0.03 — BOTH must
-    # realize a nonzero count (the old fixed-index tiebreak gave explore == 0).
+    # Both equal small shares must receive starts.
     counts = _simulate({"exploit": 0.94, "rescue": 0.03, "explore": 0.03})
     assert counts["explore"] > 0, counts
     assert counts["rescue"] > 0, counts
@@ -30,12 +25,7 @@ def test_small_equal_shares_do_not_starve_explore():
 
 
 def test_explore_at_floor_realizes_reliably():
-    # At/above the ~1/(2K)=0.05 reliable floor, explore is never starved (the
-    # clamps raise explore_min to >=0.05 in productive/stalled/rescue_rich, so
-    # this is the production-relevant regime). NOTE: shares strictly BELOW ~0.05
-    # remain quantization-limited by the K=10 window — a known bottleneck, not the
-    # tiebreak bug fixed here; deepening it would need a larger K or a continuous
-    # debt accumulator.
+    # Shares below the moving-window resolution can remain quantization-limited.
     for mix in ({"exploit": 0.90, "rescue": 0.05, "explore": 0.05},
                 {"exploit": 0.85, "rescue": 0.10, "explore": 0.05}):
         counts = _simulate(mix)
@@ -43,8 +33,6 @@ def test_explore_at_floor_realizes_reliably():
 
 
 def test_low_evidence_explore_floor_prevents_starvation():
-    # v7_3: low_evidence now floors explore at 0.05 so a sub-floor explore share
-    # (previously unclamped → K-window-starved to 0) is realizable.
     from trex.fallback import CATEGORY_A_CLAMPS, clamp_mixture
     assert CATEGORY_A_CLAMPS["low_evidence"].explore_min == 0.05
     mix, _log = clamp_mixture({"exploit": 0.96, "rescue": 0.02, "explore": 0.02},

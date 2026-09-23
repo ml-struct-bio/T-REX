@@ -16,10 +16,8 @@ from trex.evidence_reducer import DIAGNOSTIC_AXIS_REMEDIATION
 
 def test_default_registry_includes_local_families():
     reg = default_registry()
-    # Current Complexa families map directly to implemented search algorithms;
-    # unsupported legacy aliases are intentionally absent. The 4 exposed
-    # Complexa families + 4 refilter / redesign helpers are what the planner
-    # can pick.
+    # Four Complexa search families, two external generators, one redesign
+    # family and one evaluator form the eight-family action space.
     for fam in (
         "complexa_beam",
         "complexa_best_of_n",
@@ -67,8 +65,6 @@ def test_override_to_degrade():
 
 
 def test_feasible_families_filters_unavailable():
-    # 2026-05-26: alphafold3 removed entirely (no weights). Test only verifies
-    # the feasibility filter behavior on a still-available family.
     reg = default_registry()
     fams = reg.feasible_families()
     assert "complexa_beam" in fams

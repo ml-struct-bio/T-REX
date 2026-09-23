@@ -68,7 +68,7 @@ def render_campaign(campaign: ResolvedCampaign) -> str:
         _section(
             "Backend runtime",
             (
-                ("T-ReX repository", runtime_paths.repo_root),
+                ("T-REX repository", runtime_paths.repo_root),
                 ("external root", runtime_paths.external_root),
                 ("Complexa repository", runtime_paths.complexa_repo),
                 ("Complexa Python", runtime_paths.complexa_python),

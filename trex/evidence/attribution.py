@@ -73,13 +73,8 @@ def resolve_generating_record(
     ) != CANONICAL_SCORE_CONVERSION:
         return r
     b = r.bins or {}
-    # Try EACH candidate source in order and pick the first that RESOLVES to a
-    # record. Critically, do NOT stop at a truthy-but-non-resolving source:
-    # af2_refilter writes refilter_source = a PDB PATH STRING when parent_result_id
-    # is empty, which does not key into by_result_id — the old code took that
-    # truthy path, skipped the parent_ids[1] fallback, and mis-credited the
-    # re-scorer (bug-hunt LOW). Falling through keeps the parent_ids[1] fallback
-    # live and the attribution correct on replay/migrated/hand-built records.
+    # Try each parent reference until one resolves to a result. A file path in
+    # refilter_source must not hide a valid parent_ids reference.
     ac = spawning_actions.get(r.result_id)
     sources = [
         b.get("refilter_source"),
@@ -123,7 +118,7 @@ def is_canonical_su_record(
 ) -> bool:
     """Strict record eligible for official SU accounting.
 
-    Official T-ReX SU uses the canonical single-model AF2 score-conversion gate.
+    Official T-REX SU uses the canonical single-model AF2 score-conversion gate.
     Current parsers keep diagnostic-native generator scores out of strict keys;
     this helper therefore only blocks refilter rows whose role is explicitly
     advisory (parent-model/cross-model refolds). Direct strict rows remain
@@ -143,7 +138,7 @@ def is_canonical_su_record(
     return True
 
 
-# Backward-compatible alias for historical callers.
+# Compatibility alias for downstream callers.
 _is_canonical_su_record = is_canonical_su_record
 
 
@@ -153,11 +148,8 @@ def _direct_parent_record(
     by_result_id: dict[str, ResultRecord],
     spawning_actions: dict[str, ActionCandidate],
 ) -> ResultRecord | None:
-    """Concrete parent ResultRecord for parent-bound actions.
-
-    ResultRecord.parent_ids often carries the candidate id first and the
-    concrete parent result second; ActionCandidate.parent_result_id is the
-    preferred SSOT when the spawning archive is available.
+    """Resolve the concrete parent result. Prefer the spawning candidate parent over mixed
+    candidate/result references in ResultRecord.parent_ids.
     """
     ac = spawning_actions.get(r.result_id)
     candidates: list[str | None] = [

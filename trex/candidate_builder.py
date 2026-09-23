@@ -1,11 +1,7 @@
-"""CandidateBuilder: deterministic frontier-based seed pool.
+"""Construct deterministic candidate jobs from hypotheses and archived evidence.
 
-Maps HypothesisCard.recommended_action_families to launchable
-ActionCandidates via a fixed registry. Each candidate gets a
-FeasibilityCheck that the Selector must pass before launch.
-
-MVP scope: registry is in-process dict. Real T-ReX replaces with the
-capability_registry in §17 Phase 2.
+The capability registry supplies supported families and parameters. Each candidate
+carries feasibility checks for selection.
 """
 
 from __future__ import annotations
@@ -15,7 +11,9 @@ from typing import Any
 
 import json
 
-from .dedup_trust import near_miss_dedup_trusted_from_evidence as _near_miss_dedup_trusted
+from .dedup_trust import (
+    near_miss_dedup_trusted_from_evidence as _near_miss_dedup_trusted,
+)
 from .capability_registry import (
     CapabilityRegistry,
     EVAL_BUDGET_DEFAULTS_PER_FAMILY,
@@ -35,11 +33,7 @@ from .schemas import (
 )
 
 
-# Bug G (feedback): single source of truth is `capability_registry`.
-# We previously kept a duplicate DEFAULT_REGISTRY dict here; that has been
-# removed. Use `registry.get(family)` for operator/lane/cost/allowed_params/
-# availability. This file now ONLY owns frontier construction + dedup +
-# warmstart/fallback policy.
+# The capability registry owns family metadata; this module constructs candidates.
 
 
 @dataclass(frozen=True)
@@ -105,7 +99,7 @@ class BuilderConfig:
     i4_mcts_seed_min_dry_gpu_h: float = 6.0
     i4_mcts_sufficient_gpu_h: float = 3.0
     i4_mcts_sufficient_completions: int = 2
-    # T-ReX: Complexa reward weights are late/diagnostic levers, not first-line
+    # T-REX: Complexa reward weights are late/diagnostic levers, not first-line
     # search knobs. If the LLM proposes reward_* before enough axis evidence is
     # available, keep the family but defer the reward keys and run a material
     # search perturbation first. Once the axis has enough observations, reward
@@ -160,16 +154,13 @@ def feasibility_for(
     parent_pdb_available: bool = True,
 ) -> FeasibilityCheck:
     reasons: list[str] = []
-    # fix20 #2 (2026-05-26): pre-check parent-PDB precondition for chain
-    # families. Without this, the controller emits the candidate, runs it
-    # through Selector (consuming a slot), and then SKIPs at exec time —
-    # wasting a launch and never surfacing the failure back to the
-    # Planner. With the registry metadata in place, the check is one bool
-    # against `cap.requires_parent_pdb`.
+    # Check required parent structures before allocating a candidate a worker slot.
     cap_for_meta = (registry or default_registry()).get(family)
-    if (cap_for_meta is not None
-            and cap_for_meta.requires_parent_pdb
-            and not parent_pdb_available):
+    if (
+        cap_for_meta is not None
+        and cap_for_meta.requires_parent_pdb
+        and not parent_pdb_available
+    ):
         reasons.append(f"no_parent_pdb:{family}")
         return FeasibilityCheck(
             backend_healthy=False,
@@ -185,9 +176,7 @@ def feasibility_for(
     if cfg.unavailable_backends_override is not None:
         if family in cfg.unavailable_backends_override:
             reasons.append("capability_unavailable")
-            backend_healthy = False  # 2026-05-26 fix: was leaving backend_healthy=True
-                                      #   even when family is in unavailable_override,
-                                      #   causing Selector to launch unavailable families
+            backend_healthy = False
         else:
             backend_healthy = (
                 cfg.healthy_backends_override is None
@@ -203,15 +192,15 @@ def feasibility_for(
             backend_healthy = False
         else:
             backend_healthy = True
-    if not backend_healthy and not any("unavailable" in r or "unknown" in r for r in reasons):
+    if not backend_healthy and not any(
+        "unavailable" in r or "unknown" in r for r in reasons
+    ):
         reasons.append(f"backend_unhealthy:{family}")
 
     # Route cap check: if route_health backlog is saturated, route-heavy families fail
     rh = evidence.route_health
     backlog_ratio = rh.backlog_used / max(1, rh.backlog_cap)
-    route_heavy = family in (
-        "structure_refilter",
-    )
+    route_heavy = family in ("structure_refilter",)
     route_cap_ok = not (route_heavy and backlog_ratio >= 0.95)
     if not route_cap_ok:
         reasons.append("route_backlog_saturated")
@@ -220,34 +209,25 @@ def feasibility_for(
     if not cost_ok:
         reasons.append("no_remaining_wall_clock")
     else:
-        # Remaining-wall gate (2026-05-28; rationale updated 2026-05-30 for the
-        # rev3 timeout). Block a launch that cannot reach its first-SU window
-        # before the wall. INTENTIONALLY uses the per-family EXPECTED runtime
-        # (FAMILY_RUNTIME_H, e.g. BindCraft ~2.5H) — NOT the rev3 HARD_CEILING_S
-        # (BindCraft 5H). Two reasons: (1) the expected-runtime threshold already
-        # exceeds each family's SU floor (BindCraft FAMILY_RUNTIME 2.5H > its 1.5H
-        # floor), so a launch that passes can run past its floor and produce SU;
-        # (2) rev3 salvage-parses incrementally-written accepted designs on a
-        # wall-kill, so a productive generator killed AT the wall is no longer
-        # "salvage 0" — it banks the SU it made. Gating on HARD_CEILING_S instead
-        # would idle the GPUs for the final ~5H of every run (over-restriction).
-        # Minor: the small downstream-chain refilter cost is absorbed by the drain
-        # margin. For most of the 47H run remaining_wall_h >> every family runtime
-        # so this is inert; it only gates heavy generators in the final hours.
+        # Gate on expected runtime rather than the hard timeout. Incremental outputs can
+        # be recovered at shutdown; using the hard timeout would reject useful work near
+        # the deadline.
         from .critic_guard import FAMILY_RUNTIME_H
+
         _rt = FAMILY_RUNTIME_H.get(family)
         _DRAIN_MARGIN_H = 0.1
         if _rt is not None and _rt + _DRAIN_MARGIN_H > evidence.remaining_wall_h:
             cost_ok = False
             reasons.append(
                 f"insufficient_wall_for_{family}"
-                f"(~{_rt:.1f}h>{evidence.remaining_wall_h:.1f}h_remaining)"
+                f"(~{_rt:.1f}h+{_DRAIN_MARGIN_H:.1f}h_drain_margin"
+                f">{evidence.remaining_wall_h:.1f}h_remaining)"
             )
 
     return FeasibilityCheck(
         backend_healthy=backend_healthy,
         runtime_bucket_id=cfg.default_bucket_id if backend_healthy else None,
-        compiler_ok=True,   # MVP: assume compiler always OK; real T-ReX invokes verifier
+        compiler_ok=True,  # No separate compiler is invoked for these registered jobs.
         verifier_ok=True,
         route_cap_ok=route_cap_ok,
         cost_ok=cost_ok,
@@ -256,18 +236,8 @@ def feasibility_for(
 
 
 def _failed_signature_set(evidence: EvidenceSummary) -> set[tuple[str, str]]:
-    """Build a set of (operator_id, config_key) tuples seen as `joint_fail`
-    in the EvidenceSummary recipes. Used to dedup candidates against recently
-    failed configurations.
-
-    CRITICAL (2026-05-28): the evidence reducer splits ONE config's
-    descendants by outcome into separate recipe entries that share the SAME
-    (operator_id, config_delta). A stochastic config therefore appears as both
-    joint_fail AND strict_success. Re-proposing a config that ALSO yields
-    strict successes is correct, so it must NOT be deduped. Without this
-    exclusion, 47% (77/163) of joint_fail drops across 110 archives were
-    productive configs hard-rejected by the Selector — silently killing
-    exploit. We exclude any signature that has a strict_success entry.
+    """Find failed (operator_id, config) signatures, excluding any that also produced
+    strict successes.
     """
     productive: set[tuple[str, str]] = set()
     for r in evidence.recipes:
@@ -328,9 +298,8 @@ def _cb_mh_value(h, k, d=0):
 
 
 def _is_route_light_generator_cap(cap: Any) -> bool:
-    return (
-        getattr(cap, "role", "generator") == "generator"
-        and not bool(getattr(cap, "requires_parent_pdb", False))
+    return getattr(cap, "role", "generator") == "generator" and not bool(
+        getattr(cap, "requires_parent_pdb", False)
     )
 
 
@@ -358,9 +327,15 @@ def _fallback_diversity_config(cap: Any, state_label: str) -> dict[str, object]:
         if isinstance(rng, tuple) and len(rng) == 2:
             lo, hi = float(rng[0]), float(rng[1])
             params[key] = _numeric_config_value(lo, hi, fractions[idx])
-    if state_label in ("stalled", "deep_stall", "strict_duplicate_collapse") and "refinement_algorithm" in ap:
+    if (
+        state_label in ("stalled", "deep_stall", "strict_duplicate_collapse")
+        and "refinement_algorithm" in ap
+    ):
         allowed = ap.get("refinement_algorithm")
-        if isinstance(allowed, (list, tuple, set)) and "sequence_hallucination" in allowed:
+        if (
+            isinstance(allowed, (list, tuple, set))
+            and "sequence_hallucination" in allowed
+        ):
             params.setdefault("refinement_algorithm", "sequence_hallucination")
     if not params:
         return {}
@@ -375,21 +350,28 @@ def _should_pair_complexa_sequence_hallucination(
 ) -> bool:
     """Target-agnostic Complexa refinement pairing.
 
-    T-ReX's productive easy-target routes often combined backbone/interface noise
+    T-REX's productive easy-target routes often combined backbone/interface noise
     with sequence_hallucination. If a Complexa card is already proposing an
     interface/sequence rescue or the run is in a stalled/duplicate regime, pair
     the ordinary noise/reward tweak with hallucination so the route can test the
-    T-ReX-style beam-then-hallucinate operator without a target-name prior.
+    T-REX-style beam-then-hallucinate operator without a target-name prior.
     """
     if config_delta.get("refinement_algorithm") == "sequence_hallucination":
         return False
     if primary_axis not in {"iPAE", "binder_scRMSD"}:
         return False
     state = str(getattr(evidence, "state_label", "") or "")
-    if state in {"stalled", "deep_stall", "rescue_rich", "productive_duplicate", "strict_duplicate_collapse"}:
+    if state in {
+        "stalled",
+        "deep_stall",
+        "rescue_rich",
+        "productive_duplicate",
+        "strict_duplicate_collapse",
+    }:
         return True
-    return _near_miss_dedup_trusted(evidence) and bool((getattr(evidence, "near_miss_count", 0) or 0) > 0)
-
+    return _near_miss_dedup_trusted(evidence) and bool(
+        (getattr(evidence, "near_miss_count", 0) or 0) > 0
+    )
 
 
 I4_MCTS_CONFIG: dict[str, object] = {
@@ -434,25 +416,40 @@ def _stat_pass_near_rate(stat: Any | None) -> float:
 
 _COMPLEXA_NOISE_AXIS_GROUPS: dict[str, tuple[str, ...]] = {
     "structure": ("pLDDT", "binder_pLDDT_avg", "design_ptm"),
-    "interface": ("iPAE", "min_ipae", "avg_ipsae", "max_ipsae", "ipTM", "design_to_target_iptm"),
-    "geometry": ("binder_scRMSD", "shape_complementarity", "interface_contact_density", "hotspot_rmsd", "buried_sasa"),
+    "interface": (
+        "iPAE",
+        "min_ipae",
+        "avg_ipsae",
+        "max_ipsae",
+        "ipTM",
+        "design_to_target_iptm",
+    ),
+    "geometry": (
+        "binder_scRMSD",
+        "shape_complementarity",
+        "interface_contact_density",
+        "hotspot_rmsd",
+        "buried_sasa",
+    ),
 }
 
-_COMPLEXA_MATERIAL_SEARCH_KEYS: frozenset[str] = frozenset({
-    "sc_scale_noise",
-    "temperature",
-    "beam_width",
-    "n_branch",
-    "nsamples",
-    "replicas",
-    "n_simulations",
-    "exploration_prob",
-    "exploration_constant",
-    "refinement_algorithm",
-    "n_greedy_iters",
-    "enable_greedy_optimization",
-    "greedy_percentage",
-})
+_COMPLEXA_MATERIAL_SEARCH_KEYS: frozenset[str] = frozenset(
+    {
+        "sc_scale_noise",
+        "temperature",
+        "beam_width",
+        "n_branch",
+        "nsamples",
+        "replicas",
+        "n_simulations",
+        "exploration_prob",
+        "exploration_constant",
+        "refinement_algorithm",
+        "n_greedy_iters",
+        "enable_greedy_optimization",
+        "greedy_percentage",
+    }
+)
 
 
 def _complexa_axis_group(primary_axis: str | None) -> tuple[str, ...]:
@@ -529,7 +526,7 @@ def _complexa_material_search_delta(
     cap: Any,
     existing: dict[str, object],
 ) -> dict[str, object]:
-    """Axis-matched material search tweak for T-ReX reward/config repair.
+    """Axis-matched material search tweak for T-REX reward/config repair.
 
     The helper intentionally changes sampling/search first and leaves scalar
     reward reweighting as a later diagnostic lever. It stays within the same
@@ -558,10 +555,10 @@ def _complexa_material_search_delta(
         return True
 
     state = str(getattr(evidence, "state_label", "") or "")
-    duplicate_pressure = (
-        state in {"productive_duplicate", "strict_duplicate_collapse"}
-        or bool(getattr(evidence, "strict_duplicate_collapse_signal", False))
-    )
+    duplicate_pressure = state in {
+        "productive_duplicate",
+        "strict_duplicate_collapse",
+    } or bool(getattr(evidence, "strict_duplicate_collapse_signal", False))
     axis = str(primary_axis or "")
 
     if family == "complexa_mcts":
@@ -631,7 +628,7 @@ def _repair_complexa_reward_timing(
     cap: Any,
     cfg: BuilderConfig,
 ) -> tuple[dict[str, object], list[str]]:
-    """Apply T-ReX reward timing policy to a validated Complexa config.
+    """Apply T-REX reward timing policy to a validated Complexa config.
 
     Sparse evidence: reward-only keys are deferred and replaced by a material
     search perturbation. If the LLM already paired the reward with material
@@ -647,7 +644,9 @@ def _repair_complexa_reward_timing(
     axis_n = _axis_group_observation_n(evidence, _complexa_axis_group(primary_axis))
     evidence_rich = axis_n >= int(cfg.complexa_reward_evidence_min_n)
     material_present = _complexa_has_material_search_delta(config_delta, family=family)
-    material_delta = _complexa_material_search_delta(evidence, primary_axis, family, cap, config_delta)
+    material_delta = _complexa_material_search_delta(
+        evidence, primary_axis, family, cap, config_delta
+    )
 
     if not evidence_rich and material_present and family == "complexa_mcts":
         return config_delta, []
@@ -670,7 +669,9 @@ def _repair_complexa_reward_timing(
     return config_delta, []
 
 
-def _best_axis_rates(evidence: EvidenceSummary, axes: tuple[str, ...]) -> tuple[float, float]:
+def _best_axis_rates(
+    evidence: EvidenceSummary, axes: tuple[str, ...]
+) -> tuple[float, float]:
     """Return (max fail rate, max pass-or-near support) for a metric group."""
     strict = getattr(evidence, "axis_stats", {}) or {}
     diagnostic = getattr(evidence, "diagnostic_axis_stats", {}) or {}
@@ -695,11 +696,16 @@ def _parent_bound_redesign_support(evidence: EvidenceSummary) -> float:
     """
     score = 0.0
     for row in getattr(evidence, "route_values", None) or []:
-        fam = str(_cb_mh_value(row, "action_family", _cb_mh_value(row, "family", "")) or "")
+        fam = str(
+            _cb_mh_value(row, "action_family", _cb_mh_value(row, "family", "")) or ""
+        )
         if fam not in {"proteinmpnn_redesign"}:
             continue
         try:
-            score = max(score, float(_cb_mh_value(row, "diagnostic_improvement_score", 0.0) or 0.0))
+            score = max(
+                score,
+                float(_cb_mh_value(row, "diagnostic_improvement_score", 0.0) or 0.0),
+            )
         except (TypeError, ValueError):
             continue
     return score
@@ -728,14 +734,26 @@ def _adaptive_complexa_sc_scale_noise(
     except (TypeError, ValueError):
         return None
 
-    structure_fail, structure_support = _best_axis_rates(evidence, _COMPLEXA_NOISE_AXIS_GROUPS["structure"])
-    interface_fail, interface_support = _best_axis_rates(evidence, _COMPLEXA_NOISE_AXIS_GROUPS["interface"])
-    geometry_fail, geometry_support = _best_axis_rates(evidence, _COMPLEXA_NOISE_AXIS_GROUPS["geometry"])
+    structure_fail, structure_support = _best_axis_rates(
+        evidence, _COMPLEXA_NOISE_AXIS_GROUPS["structure"]
+    )
+    interface_fail, interface_support = _best_axis_rates(
+        evidence, _COMPLEXA_NOISE_AXIS_GROUPS["interface"]
+    )
+    geometry_fail, geometry_support = _best_axis_rates(
+        evidence, _COMPLEXA_NOISE_AXIS_GROUPS["geometry"]
+    )
     redesign_support = _parent_bound_redesign_support(evidence)
     has_metric_signal = any(
-        v > 0.0 for v in (
-            structure_fail, structure_support, interface_fail, interface_support,
-            geometry_fail, geometry_support, redesign_support,
+        v > 0.0
+        for v in (
+            structure_fail,
+            structure_support,
+            interface_fail,
+            interface_support,
+            geometry_fail,
+            geometry_support,
+            redesign_support,
         )
     )
 
@@ -744,7 +762,9 @@ def _adaptive_complexa_sc_scale_noise(
         if structure_fail >= 0.60 or geometry_fail >= 0.70:
             # Bad fold/global geometry: treat as stronger structure regeneration.
             fraction = 0.85
-        elif interface_fail >= 0.70 and max(structure_support, geometry_support) >= 0.50:
+        elif (
+            interface_fail >= 0.70 and max(structure_support, geometry_support) >= 0.50
+        ):
             # Fold is plausible but interface is wrong: re-dock, not a full reset.
             fraction = 0.65
         elif interface_fail >= 0.60 or geometry_fail >= 0.50:
@@ -757,7 +777,10 @@ def _adaptive_complexa_sc_scale_noise(
             fraction = min(fraction, 0.50)
         elif redesign_support >= 0.35:
             fraction = min(fraction, 0.60)
-        if max(structure_support, interface_support, geometry_support) >= 0.70 and max(structure_fail, interface_fail, geometry_fail) < 0.50:
+        if (
+            max(structure_support, interface_support, geometry_support) >= 0.70
+            and max(structure_fail, interface_fail, geometry_fail) < 0.50
+        ):
             fraction = min(fraction, 0.45)
     else:
         # Fallback only: no qualified metric block yet. Keep this mild so state
@@ -853,14 +876,17 @@ def _i4_mcts_sufficiently_tried(evidence: EvidenceSummary, cfg: BuilderConfig) -
     new_su = int(_cb_mh_value(best, "new_su", 0) or 0)
     near_recent = int(_cb_mh_value(best, "near_miss_recent", 0) or 0)
     diag_score = float(_cb_mh_value(best, "diagnostic_improvement_score", 0.0) or 0.0)
-    if new_su > 0 or near_recent > 0 or diag_score >= float(cfg.cross_family_diagnostic_improvement_min_score):
+    if (
+        new_su > 0
+        or near_recent > 0
+        or diag_score >= float(cfg.cross_family_diagnostic_improvement_min_score)
+    ):
         return False
 
     route_gpu_h = float(_cb_mh_value(best, "route_gpu_h", 0.0) or 0.0)
     completions = int(_cb_mh_value(best, "completions", 0) or 0)
-    return (
-        route_gpu_h >= float(cfg.i4_mcts_sufficient_gpu_h)
-        and completions >= int(cfg.i4_mcts_sufficient_completions)
+    return route_gpu_h >= float(cfg.i4_mcts_sufficient_gpu_h) and completions >= int(
+        cfg.i4_mcts_sufficient_completions
     )
 
 
@@ -913,30 +939,34 @@ def _diagnostic_i4_mcts_candidates(
         parent_pdb_available=parent_pdb_available,
     )
     tick_tag = evidence.tick_id or "t000"
-    return [ActionCandidate(
-        candidate_id=f"diagnostic_i4_mcts_{tick_tag}_complexa_mcts",
-        hypothesis_ids=["diagnostic_i4_mcts"],
-        parent_result_id=None,
-        method_family="complexa_mcts",
-        operator_id=cap.default_operator_id,
-        lane_id=cap.default_lane_id,
-        config_delta=dict(config_delta),
-        downstream_route_plan=_downstream_score_conversion_plan("complexa_mcts", cap),
-        estimated_cost_class=cap.default_cost_class,
-        expected_signal=(
-            "diagnostic_i4_mcts pLDDT-aware MCTS: "
-            "pLDDT/scaffold-confidence blocker with plausible interface evidence"
-        ),
-        evidence_refs=[
-            "hard_target_signal",
-            "diagnostic_driver_tldr",
-            "joint_patterns",
-            "diagnostic_axis_stats",
-            "dry_since_last_SU",
-        ],
-        feasibility=feas,
-        supervisor_mode="explore",
-    )]
+    return [
+        ActionCandidate(
+            candidate_id=f"diagnostic_i4_mcts_{tick_tag}_complexa_mcts",
+            hypothesis_ids=["diagnostic_i4_mcts"],
+            parent_result_id=None,
+            method_family="complexa_mcts",
+            operator_id=cap.default_operator_id,
+            lane_id=cap.default_lane_id,
+            config_delta=dict(config_delta),
+            downstream_route_plan=_downstream_score_conversion_plan(
+                "complexa_mcts", cap
+            ),
+            estimated_cost_class=cap.default_cost_class,
+            expected_signal=(
+                "diagnostic_i4_mcts pLDDT-aware MCTS: "
+                "pLDDT/scaffold-confidence blocker with plausible interface evidence"
+            ),
+            evidence_refs=[
+                "hard_target_signal",
+                "diagnostic_driver_tldr",
+                "joint_patterns",
+                "diagnostic_axis_stats",
+                "dry_since_last_SU",
+            ],
+            feasibility=feas,
+            supervisor_mode="explore",
+        )
+    ]
 
 
 def _evidence_guided_fallback_seeds(
@@ -959,8 +989,18 @@ def _evidence_guided_fallback_seeds(
         recent_chain = float(_cb_mh_value(h, "chained_su_per_gpu_h_recent", 0.0) or 0.0)
         recent_near = int(_cb_mh_value(h, "near_miss_yield_recent", 0) or 0)
         recent_signal = recent_su > 0.0 or recent_chain > 0.0 or recent_near > 0
-        dead = gpu_h >= 3.0 and strict == 0 and chained == 0 and near == 0 and not recent_signal
-        stale = gpu_h >= 6.0 and not recent_signal and (strict > 0 or chained > 0 or near > 0)
+        dead = (
+            gpu_h >= 3.0
+            and strict == 0
+            and chained == 0
+            and near == 0
+            and not recent_signal
+        )
+        stale = (
+            gpu_h >= 6.0
+            and not recent_signal
+            and (strict > 0 or chained > 0 or near > 0)
+        )
         penalty = 2 if dead else 1 if stale else 0
         params = _fallback_diversity_config(cap, evidence.state_label)
         tag = "evidence_fallback_dead_probe" if dead else "evidence_fallback"
@@ -1004,18 +1044,20 @@ def _scaled_wall_reason(
     config_delta: dict[str, object] | None,
     evidence: EvidenceSummary,
 ) -> str | None:
-    """llm-004 (2026-06-18): the remaining-wall gate in feasibility_for uses a FLAT
-    per-family FAMILY_RUNTIME_H, but a heavy config_delta scales a generator's actual
-    runtime (bindcraft max_trajectories, boltzgen num_designs×budget, complexa search
-    expansion), so a config-heavy launch can pass the flat gate near end-of-run and
-    then run to its HARD_CEILING and be wall-killed — wasting the unfinished tail in
-    the SU/GPU-h denominator. Returns an infeasibility reason when the budget-scaled
-    expected runtime no longer fits the remaining wall, else None. Multiplier is
-    floored at 1.0 so default/empty configs are unchanged (this can only ADD
-    restriction, never relax the base gate)."""
+    """Reject configurations whose budget-scaled expected runtime exceeds the remaining
+    time.
+
+    The multiplier is at least one, so this check cannot relax the base feasibility
+    gate.
+    """
     from .critic_guard import FAMILY_RUNTIME_H
+
     rt = FAMILY_RUNTIME_H.get(family)
-    if rt is None or evidence.remaining_wall_h is None or evidence.remaining_wall_h <= 0:
+    if (
+        rt is None
+        or evidence.remaining_wall_h is None
+        or evidence.remaining_wall_h <= 0
+    ):
         return None
     if not config_delta:
         return None  # default config → base gate already covers it
@@ -1076,13 +1118,21 @@ def _normalize_result_ref(ref: str | None) -> str | None:
     if _looks_like_result_id(s):
         return s
     for prefix in (
-        "exemplar_", "exemplars.", "exemplars:",
-        "example_", "examples.", "examples:",
-        "production_panel_selected:", "production_panel_selected_ids.", "production_panel_selected_ids:",
-        "production_near_miss:", "production_near_miss_ids.", "production_near_miss_ids:",
+        "exemplar_",
+        "exemplars.",
+        "exemplars:",
+        "example_",
+        "examples.",
+        "examples:",
+        "production_panel_selected:",
+        "production_panel_selected_ids.",
+        "production_panel_selected_ids:",
+        "production_near_miss:",
+        "production_near_miss_ids.",
+        "production_near_miss_ids:",
     ):
         if s.startswith(prefix):
-            rid = s[len(prefix):]
+            rid = s[len(prefix) :]
             if _looks_like_result_id(rid):
                 return rid
     return None
@@ -1181,7 +1231,9 @@ def _joint_fail_only_representative_ids(evidence: EvidenceSummary) -> set[str]:
     return joint_fail - productive_or_near
 
 
-def _joint_fail_parent_source_families(evidence: EvidenceSummary) -> dict[str, set[str]]:
+def _joint_fail_parent_source_families(
+    evidence: EvidenceSummary,
+) -> dict[str, set[str]]:
     """Map joint-fail representatives to the families that generated them."""
     out: dict[str, set[str]] = {}
     for r in getattr(evidence, "recipes", None) or []:
@@ -1196,7 +1248,6 @@ def _joint_fail_parent_source_families(evidence: EvidenceSummary) -> dict[str, s
     return out
 
 
-
 def _source_families_for_row(row: Any) -> set[str]:
     out: set[str] = set()
     for key in ("action_family", "root_family", "family", "method_family"):
@@ -1206,7 +1257,9 @@ def _source_families_for_row(row: Any) -> set[str]:
     return out
 
 
-def _add_parent_source(out: dict[str, set[str]], rid: str | None, families: set[str]) -> None:
+def _add_parent_source(
+    out: dict[str, set[str]], rid: str | None, families: set[str]
+) -> None:
     norm = _normalize_result_ref(rid)
     if norm is not None and families:
         out.setdefault(norm, set()).update(families)
@@ -1215,7 +1268,9 @@ def _add_parent_source(out: dict[str, set[str]], rid: str | None, families: set[
 def _parent_source_family_map(evidence: EvidenceSummary) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     for ex in getattr(evidence, "examples", None) or []:
-        _add_parent_source(out, getattr(ex, "result_id", None), _source_families_for_row(ex))
+        _add_parent_source(
+            out, getattr(ex, "result_id", None), _source_families_for_row(ex)
+        )
     for ex in getattr(evidence, "exemplars", None) or []:
         families = _source_families_for_row(ex)
         _add_parent_source(out, getattr(ex, "result_id", None), families)
@@ -1226,7 +1281,12 @@ def _parent_source_family_map(evidence: EvidenceSummary) -> dict[str, set[str]]:
             _add_parent_source(out, rep, families)
     for row in getattr(evidence, "strategy_feedback", None) or []:
         families = _source_families_for_row(row)
-        for key in ("representative_result_ids", "representative_strict_ids", "representative_near_miss_ids", "representative_failure_ids"):
+        for key in (
+            "representative_result_ids",
+            "representative_strict_ids",
+            "representative_near_miss_ids",
+            "representative_failure_ids",
+        ):
             values = _cb_mh_value(row, key, []) or []
             if isinstance(values, str):
                 values = [values]
@@ -1243,13 +1303,42 @@ def _parent_source_family_map(evidence: EvidenceSummary) -> dict[str, set[str]]:
 
 
 _PARENT_SOURCE_PHRASES: dict[str, tuple[str, ...]] = {
-    "boltzgen": ("boltzgen backlog", "boltzgen backbones", "boltzgen backbone", "boltzgen-generated", "boltzgen generated", "boltzgen artifact", "boltzgen artifacts", "boltzgen parent"),
-    "bindcraft": ("bindcraft backlog", "bindcraft backbones", "bindcraft backbone", "bindcraft-generated", "bindcraft generated", "bindcraft artifact", "bindcraft artifacts", "bindcraft parent"),
-    "complexa": ("complexa backlog", "complexa backbones", "complexa backbone", "complexa-generated", "complexa generated", "complexa artifact", "complexa artifacts", "complexa parent"),
+    "boltzgen": (
+        "boltzgen backlog",
+        "boltzgen backbones",
+        "boltzgen backbone",
+        "boltzgen-generated",
+        "boltzgen generated",
+        "boltzgen artifact",
+        "boltzgen artifacts",
+        "boltzgen parent",
+    ),
+    "bindcraft": (
+        "bindcraft backlog",
+        "bindcraft backbones",
+        "bindcraft backbone",
+        "bindcraft-generated",
+        "bindcraft generated",
+        "bindcraft artifact",
+        "bindcraft artifacts",
+        "bindcraft parent",
+    ),
+    "complexa": (
+        "complexa backlog",
+        "complexa backbones",
+        "complexa backbone",
+        "complexa-generated",
+        "complexa generated",
+        "complexa artifact",
+        "complexa artifacts",
+        "complexa parent",
+    ),
 }
 
 
-def _requested_parent_source_families(h: HypothesisCard, action_family: str) -> set[str]:
+def _requested_parent_source_families(
+    h: HypothesisCard, action_family: str
+) -> set[str]:
     if action_family not in {"proteinmpnn_redesign", "structure_refilter"}:
         return set()
     text = _hypothesis_action_text(h)
@@ -1263,10 +1352,19 @@ def _requested_parent_source_families(h: HypothesisCard, action_family: str) -> 
 def _family_matches_requested_source(source_family: str, requested_family: str) -> bool:
     if requested_family == "complexa":
         return _root_family_group(source_family) == "complexa"
-    return source_family == requested_family or _root_family_group(source_family) == requested_family
+    return (
+        source_family == requested_family
+        or _root_family_group(source_family) == requested_family
+    )
 
 
-def _parent_source_mismatch_reason(*, hypothesis: HypothesisCard, action_family: str, parent_result_id: str | None, parent_source_families: dict[str, set[str]]) -> str | None:
+def _parent_source_mismatch_reason(
+    *,
+    hypothesis: HypothesisCard,
+    action_family: str,
+    parent_result_id: str | None,
+    parent_source_families: dict[str, set[str]],
+) -> str | None:
     if not parent_result_id:
         return None
     requested = _requested_parent_source_families(hypothesis, action_family)
@@ -1275,20 +1373,27 @@ def _parent_source_mismatch_reason(*, hypothesis: HypothesisCard, action_family:
     known = parent_source_families.get(parent_result_id, set())
     if not known:
         return None
-    if any(_family_matches_requested_source(src, req) for src in known for req in requested):
+    if any(
+        _family_matches_requested_source(src, req) for src in known for req in requested
+    ):
         return None
-    return "parent_source_mismatch:" + f"requested={chr(44).join(sorted(requested))}:resolved={chr(44).join(sorted(known))}:parent={parent_result_id}"
+    return (
+        "parent_source_mismatch:"
+        + f"requested={chr(44).join(sorted(requested))}:resolved={chr(44).join(sorted(known))}:parent={parent_result_id}"
+    )
 
 
 def _hypothesis_text(h: HypothesisCard) -> str:
     rt = getattr(h, "reasoning_trace", None)
     parts = [getattr(h, "claim", "")]
     if rt is not None:
-        parts.extend([
-            getattr(rt, "observed_signal", ""),
-            getattr(rt, "inference", ""),
-            getattr(rt, "action_implication", ""),
-        ])
+        parts.extend(
+            [
+                getattr(rt, "observed_signal", ""),
+                getattr(rt, "inference", ""),
+                getattr(rt, "action_implication", ""),
+            ]
+        )
     parts.extend(str(x) for x in (getattr(h, "evidence_refs", None) or []))
     return " ".join(p for p in parts if p).lower()
 
@@ -1314,36 +1419,68 @@ def _hypothesis_requests_existing_score_backlog(h: HypothesisCard) -> bool:
     text = _hypothesis_text(h)
     action_text = _hypothesis_action_text(h)
     generation_intent = any(
-        term in action_text for term in (
-            "new generation", "generate new", "generate another",
-            "new boltzgen", "new bindcraft", "fresh generation",
-            "fresh boltzgen", "fresh bindcraft", "explore boltzgen",
-            "explore bindcraft", "generate structurally", "different seed",
+        term in action_text
+        for term in (
+            "new generation",
+            "generate new",
+            "generate another",
+            "new boltzgen",
+            "new bindcraft",
+            "fresh generation",
+            "fresh boltzgen",
+            "fresh bindcraft",
+            "explore boltzgen",
+            "explore bindcraft",
+            "generate structurally",
+            "different seed",
             "different stochastic seed",
         )
     )
     explicit_not_scoring = any(
-        term in action_text for term in (
-            "not a scoring request", "not a score request",
-            "not score-conversion", "not scoring", "while the backlog is scored",
+        term in action_text
+        for term in (
+            "not a scoring request",
+            "not a score request",
+            "not score-conversion",
+            "not scoring",
+            "while the backlog is scored",
             "while backlog is scored",
         )
     )
     if generation_intent or explicit_not_scoring:
         return False
     has_backlog = any(
-        term in text for term in (
-            "diagnostic_chain_backlog", "backlog", "pending", "unscored",
-            "already accepted", "accepted artifact", "accepted artifacts",
+        term in text
+        for term in (
+            "diagnostic_chain_backlog",
+            "backlog",
+            "pending",
+            "unscored",
+            "already accepted",
+            "accepted artifact",
+            "accepted artifacts",
         )
     )
     has_score_action = any(
-        term in action_text for term in (
-            "score pending", "score existing", "score accepted",
-            "score the backlog", "score backlog", "scoring backlog",
-            "rescore pending", "rescore existing", "convert pending",
-            "convert existing", "convert accepted", "clear pending", "clear backlog",
-            "drain", "canonical", "structure_refilter", "chain_refilter",
+        term in action_text
+        for term in (
+            "score pending",
+            "score existing",
+            "score accepted",
+            "score the backlog",
+            "score backlog",
+            "scoring backlog",
+            "rescore pending",
+            "rescore existing",
+            "convert pending",
+            "convert existing",
+            "convert accepted",
+            "clear pending",
+            "clear backlog",
+            "drain",
+            "canonical",
+            "structure_refilter",
+            "chain_refilter",
         )
     )
     return has_backlog and has_score_action
@@ -1426,7 +1563,9 @@ def _diagnostic_route_feedback_reason(
     """
     if family not in _DIAGNOSTIC_ROUTE_FEEDBACK_FAMILIES:
         return None
-    cfg_key = json.dumps(_normalized_diagnostic_route_config(family, config_delta), sort_keys=True)
+    cfg_key = json.dumps(
+        _normalized_diagnostic_route_config(family, config_delta), sort_keys=True
+    )
     for row in getattr(evidence, "route_values", None) or []:
         if _row_scope(row) != "route":
             continue
@@ -1435,7 +1574,12 @@ def _diagnostic_route_feedback_reason(
         row_cfg = _cb_mh_value(row, "config_delta", {}) or {}
         if not isinstance(row_cfg, dict):
             row_cfg = {}
-        if json.dumps(_normalized_diagnostic_route_config(family, row_cfg), sort_keys=True) != cfg_key:
+        if (
+            json.dumps(
+                _normalized_diagnostic_route_config(family, row_cfg), sort_keys=True
+            )
+            != cfg_key
+        ):
             continue
         pending = int(_cb_mh_value(row, "pending_score_conversion_count", 0) or 0)
         if pending <= 0:
@@ -1499,14 +1643,9 @@ def _is_aggregate_evidence_ref(ref: str) -> bool:
     return ref in aggregate_exact or ref.startswith(aggregate_prefixes)
 
 
-# Canonical AF2 score-conversion config = the FIXED SU-minting basis (matches the
-# auto-chain conversion + the V5/V6.3 baseline). An LLM-proposed structure_refilter
-# is an intentional `parent_model_refold` (on the E/R/X budget, credited as its own
-# refold strategy) ONLY if it MATERIALLY changes this scoring config. A no-op /
-# default re-score is functionally the auto-chain conversion, so it is tagged
-# canonical (off-budget, SU credited to the upstream generator) — this stops the
-# LLM from relabeling free score-conversion as a budgeted scientific action and
-# from silently stealing SU credit from the generator that produced the backbone.
+# Default AF2 settings perform canonical score conversion, with SU credit assigned
+# to the generating family. A materially changed configuration is an intentional
+# parent_model_refold that participates in R/E/X allocation.
 
 
 def _downstream_score_conversion_plan(family: str, cap) -> list[str]:
@@ -1531,11 +1670,14 @@ _CANONICAL_REFILTER_CONFIG: dict[str, object] = {
 }
 
 
-def _structure_refilter_role(method_family: str, config_delta: dict | None) -> str | None:
+def _structure_refilter_role(
+    method_family: str, config_delta: dict | None
+) -> str | None:
     if method_family != "structure_refilter":
         return None
     return (
-        PARENT_MODEL_REFOLD if _is_material_parent_model_refold(config_delta)
+        PARENT_MODEL_REFOLD
+        if _is_material_parent_model_refold(config_delta)
         else CANONICAL_SCORE_CONVERSION
     )
 
@@ -1602,23 +1744,10 @@ def _warmstart_candidates(
     parent_pdb_available: bool = True,
     completed_families: set[str] | None = None,
 ) -> list[ActionCandidate]:
-    """Deterministic seed candidates.
+    """Construct deterministic cold-start and stalled-campaign candidates.
 
-    Two cases:
-      (1) Cold archive (no recipes, state=low_evidence): emit the accepted
-          three-paradigm seed lanes. Fires even if the LLM also produced cards
-          — cold-start guarantees a launchable evidence floor.
-      (2) Stalled/deep-stall/strict-duplicate-collapse state with no usable
-          generator card: emit evidence-ranked route-light generators from the
-          capability registry.
-          This prevents an empty LLM tick from idling GPUs without reintroducing
-          a fixed post-evidence method-family prior.
-
-    M-1 fix (2026-05-26): Stalled-fallback no longer fires when the LLM has
-    proposed hypotheses. The LLM's diagnostic rescue cards, including
-    Complexa-internal tuning cards, were being out-competed for selector quota
-    by deterministic fallback candidates. The fallback is a safety net for
-    empty/dead-end LLM output, not a parallel exploration channel.
+    Cold archives receive seed candidates even when cards are present. Stalled campaigns
+    receive evidence-ranked alternatives when no usable generator card is available.
     """
     if evidence.state_label == "low_evidence":
         # Cold-start warmstart only when the archive carries no evidence yet.
@@ -1642,14 +1771,25 @@ def _warmstart_candidates(
     cluster_unavail = set(cfg.unavailable_backends_override or ())
     completed_families = set(completed_families or ())
     for i, (seed_tag, fam, params) in enumerate(seeds):
-        if fam in cluster_unavail or (seed_tag == "warmstart" and fam in completed_families):
+        if fam in cluster_unavail or (
+            seed_tag == "warmstart" and fam in completed_families
+        ):
             continue
         cap = registry.get(fam) if registry else None
         if cap is None:
             continue
-        op, lane, cost = cap.default_operator_id, cap.default_lane_id, cap.default_cost_class
-        feas = feasibility_for(fam, evidence, cfg, registry=registry,
-                                    parent_pdb_available=parent_pdb_available)
+        op, lane, cost = (
+            cap.default_operator_id,
+            cap.default_lane_id,
+            cap.default_cost_class,
+        )
+        feas = feasibility_for(
+            fam,
+            evidence,
+            cfg,
+            registry=registry,
+            parent_pdb_available=parent_pdb_available,
+        )
         # Diagnostic-only capabilities emit native/advisory structures, not the
         # strict AF2-calibrated metrics, so their artifacts must chain through
         # canonical structure_refilter to enter the SU path. Use registry
@@ -1673,7 +1813,6 @@ def _warmstart_candidates(
     return out
 
 
-
 def _route_value_rate_signal(row: Any) -> _RouteValueRateSignal:
     """Decision-safe route value for replay/allocation.
 
@@ -1683,13 +1822,16 @@ def _route_value_rate_signal(row: Any) -> _RouteValueRateSignal:
     contain only tiny AF2 refilter records while missing the generator GPU-h.
     Lifetime value is memory, not current exploit evidence.
     """
+
     def _as_float(value: Any) -> float | None:
         try:
             return float(value) if value is not None else None
         except (TypeError, ValueError):
             return None
 
-    lifetime = max(0.0, _as_float(_cb_mh_value(row, "new_su_per_route_gpu_h", None)) or 0.0)
+    lifetime = max(
+        0.0, _as_float(_cb_mh_value(row, "new_su_per_route_gpu_h", None)) or 0.0
+    )
 
     value = _as_float(_cb_mh_value(row, "gpu_recent_new_su_per_route_gpu_h", None))
     if value is not None:
@@ -1700,18 +1842,24 @@ def _route_value_rate_signal(row: Any) -> _RouteValueRateSignal:
         return _RouteValueRateSignal(max(0.0, value), "medium_recent", True, lifetime)
 
     route_role = str(_cb_mh_value(row, "route_role", "") or "")
-    canonical_refilter_gpu_h = _as_float(_cb_mh_value(row, "canonical_refilter_gpu_h", 0.0)) or 0.0
-    record_value = _as_float(_cb_mh_value(
-        row,
-        "record_recent_new_su_per_route_gpu_h",
-        _cb_mh_value(row, "recent_new_su_per_route_gpu_h", None),
-    ))
+    canonical_refilter_gpu_h = (
+        _as_float(_cb_mh_value(row, "canonical_refilter_gpu_h", 0.0)) or 0.0
+    )
+    record_value = _as_float(
+        _cb_mh_value(
+            row,
+            "record_recent_new_su_per_route_gpu_h",
+            _cb_mh_value(row, "recent_new_su_per_route_gpu_h", None),
+        )
+    )
     if (
         record_value is not None
         and canonical_refilter_gpu_h <= 0.0
         and "score_conversion" not in route_role
     ):
-        return _RouteValueRateSignal(max(0.0, record_value), "record_recent", True, lifetime)
+        return _RouteValueRateSignal(
+            max(0.0, record_value), "record_recent", True, lifetime
+        )
 
     return _RouteValueRateSignal(lifetime, "lifetime_memory", False, lifetime)
 
@@ -1775,7 +1923,9 @@ def _route_value_replay_candidates(
     status_rank = {"promote": 0, "healthy": 1, "observed": 2}
     rows: list[tuple[tuple[float, ...], Any, dict[str, Any], Any]] = []
     for row in getattr(evidence, "route_values", None) or []:
-        if getattr(row, "scope", None) != "route" and not (isinstance(row, dict) and row.get("scope") == "route"):
+        if getattr(row, "scope", None) != "route" and not (
+            isinstance(row, dict) and row.get("scope") == "route"
+        ):
             continue
         status = str(_cb_mh_value(row, "status", "observed") or "observed")
         marginal_status = str(_cb_mh_value(row, "marginal_status", status) or status)
@@ -1794,15 +1944,24 @@ def _route_value_replay_candidates(
         cap = registry.get(fam)
         if cap is None or not _is_route_light_generator_cap(cap):
             continue
-        if fam in set(cfg.unavailable_backends_override or ()):  # cluster-level family filter
+        if fam in set(
+            cfg.unavailable_backends_override or ()
+        ):  # cluster-level family filter
             continue
         raw_cfg = _cb_mh_value(row, "config_delta", {}) or {}
         if not isinstance(raw_cfg, dict):
             raw_cfg = {}
-        config_delta, dropped = validate_config_delta_partial(cap, raw_cfg) if raw_cfg else ({}, [])
+        config_delta, dropped = (
+            validate_config_delta_partial(cap, raw_cfg) if raw_cfg else ({}, [])
+        )
         if raw_cfg and dropped and not config_delta:
             continue
-        sig = (fam, cap.default_operator_id, json.dumps(dict(config_delta), sort_keys=True), None)
+        sig = (
+            fam,
+            cap.default_operator_id,
+            json.dumps(dict(config_delta), sort_keys=True),
+            None,
+        )
         if sig in seen:
             continue
         lifetime_rate = float(_cb_mh_value(row, "new_su_per_route_gpu_h", 0.0) or 0.0)
@@ -1815,11 +1974,23 @@ def _route_value_replay_candidates(
         recent_gpu = _route_value_recent_gpu_h(row)
         route_gpu_h = float(_cb_mh_value(row, "route_gpu_h", 0.0) or 0.0)
         route_role = str(_cb_mh_value(row, "route_role", "") or "")
-        canonical_refilter_gpu_h = float(_cb_mh_value(row, "canonical_refilter_gpu_h", 0.0) or 0.0)
-        pending_score_conversion = int(_cb_mh_value(row, "pending_score_conversion_count", 0) or 0)
-        diag_score = float(_cb_mh_value(row, "diagnostic_improvement_score", 0.0) or 0.0)
-        diag_axes = [str(x) for x in (_cb_mh_value(row, "diagnostic_improvement_axes", []) or []) if str(x)]
-        objective_signal = new_su > 0 or new_su_recent > 0 or near > 0 or near_recent > 0
+        canonical_refilter_gpu_h = float(
+            _cb_mh_value(row, "canonical_refilter_gpu_h", 0.0) or 0.0
+        )
+        pending_score_conversion = int(
+            _cb_mh_value(row, "pending_score_conversion_count", 0) or 0
+        )
+        diag_score = float(
+            _cb_mh_value(row, "diagnostic_improvement_score", 0.0) or 0.0
+        )
+        diag_axes = [
+            str(x)
+            for x in (_cb_mh_value(row, "diagnostic_improvement_axes", []) or [])
+            if str(x)
+        ]
+        objective_signal = (
+            new_su > 0 or new_su_recent > 0 or near > 0 or near_recent > 0
+        )
         delayed_feedback_route = (
             bool(getattr(cap, "outputs_diagnostic_only", False))
             or "score_conversion" in route_role
@@ -1831,19 +2002,23 @@ def _route_value_replay_candidates(
             and pending_score_conversion <= 0
             and diag_score >= float(cfg.cross_family_diagnostic_improvement_min_score)
             and route_gpu_h <= float(cfg.route_value_replay_diagnostic_max_gpu_h)
-            and marginal_status not in {"dry_low_quality", "dry_duplicate", "collapse_risk"}
+            and marginal_status
+            not in {"dry_low_quality", "dry_duplicate", "collapse_risk"}
         )
         if status == "defer" and not diagnostic_replay:
             continue
         if not (objective_signal or diagnostic_replay):
             continue
         try:
-            target_dry_gpu_h = float(getattr(evidence, "gpu_h_since_last_su", 0.0) or 0.0)
+            target_dry_gpu_h = float(
+                getattr(evidence, "gpu_h_since_last_su", 0.0) or 0.0
+            )
         except (TypeError, ValueError):
             target_dry_gpu_h = 0.0
         has_gpu_or_medium_recent_signal = (
             _cb_mh_value(row, "gpu_recent_new_su_per_route_gpu_h", None) is not None
-            or _cb_mh_value(row, "medium_recent_new_su_per_route_gpu_h", None) is not None
+            or _cb_mh_value(row, "medium_recent_new_su_per_route_gpu_h", None)
+            is not None
             or int(_cb_mh_value(row, "new_su_recent_gpu", 0) or 0) > 0
             or int(_cb_mh_value(row, "medium_recent_new_su", 0) or 0) > 0
         )
@@ -1872,7 +2047,12 @@ def _route_value_replay_candidates(
             continue
         if stale_record_memory:
             continue
-        if objective_signal and rate < cfg.route_value_replay_min_su_per_gpu_h and new_su_recent <= 0 and near_recent <= 0:
+        if (
+            objective_signal
+            and rate < cfg.route_value_replay_min_su_per_gpu_h
+            and new_su_recent <= 0
+            and near_recent <= 0
+        ):
             continue
         signal_rank = 0 if objective_signal else 1
         stale_memory_rank = 1 if (stale_lifetime_memory or stale_record_memory) else 0
@@ -1894,8 +2074,12 @@ def _route_value_replay_candidates(
     rows.sort(key=lambda x: (x[0], str(_cb_mh_value(x[1], "strategy_key", ""))))
     out: list[ActionCandidate] = []
     tick_tag = evidence.tick_id or "t000"
-    for idx, (_, row, config_delta, cap) in enumerate(rows[:max(0, int(cfg.route_value_replay_max_candidates))]):
-        fam = str(_cb_mh_value(row, "action_family", None) or _cb_mh_value(row, "family", ""))
+    for idx, (_, row, config_delta, cap) in enumerate(
+        rows[: max(0, int(cfg.route_value_replay_max_candidates))]
+    ):
+        fam = str(
+            _cb_mh_value(row, "action_family", None) or _cb_mh_value(row, "family", "")
+        )
         feas = feasibility_for(
             fam,
             evidence,
@@ -1903,14 +2087,22 @@ def _route_value_replay_candidates(
             registry=registry,
             parent_pdb_available=parent_pdb_available,
         )
-        refs = [str(x) for x in (_cb_mh_value(row, "evidence_refs", []) or []) if str(x)]
+        refs = [
+            str(x) for x in (_cb_mh_value(row, "evidence_refs", []) or []) if str(x)
+        ]
         if not refs:
             refs = ["route_values"]
         rate_signal = _route_value_rate_signal(row)
         rate = rate_signal.rate
         status_text = str(_cb_mh_value(row, "status", "observed") or "observed")
-        diag_score = float(_cb_mh_value(row, "diagnostic_improvement_score", 0.0) or 0.0)
-        diag_axes = [str(x) for x in (_cb_mh_value(row, "diagnostic_improvement_axes", []) or []) if str(x)]
+        diag_score = float(
+            _cb_mh_value(row, "diagnostic_improvement_score", 0.0) or 0.0
+        )
+        diag_axes = [
+            str(x)
+            for x in (_cb_mh_value(row, "diagnostic_improvement_axes", []) or [])
+            if str(x)
+        ]
         objective_signal = (
             int(_cb_mh_value(row, "new_su", 0) or 0) > 0
             or _route_value_recent_new_su(row) > 0
@@ -1942,39 +2134,41 @@ def _route_value_replay_candidates(
             expected += f" diagnostic_improvement_score={diag_score:.3f}"
             if diag_axes:
                 expected += " diagnostic_axes=" + ";".join(diag_axes[:3])
-        out.append(ActionCandidate(
-            candidate_id=f"route_replay_{tick_tag}_{idx:02d}_{fam}",
-            hypothesis_ids=["route_value_replay"],
-            parent_result_id=None,
-            method_family=fam,
-            operator_id=cap.default_operator_id,
-            lane_id=cap.default_lane_id,
-            config_delta=dict(config_delta),
-            downstream_route_plan=_downstream_score_conversion_plan(fam, cap),
-            estimated_cost_class=cap.default_cost_class,
-            expected_signal=expected,
-            evidence_refs=refs[:4],
-            feasibility=feas,
-            supervisor_mode=(
-                "exploit"
-                if (
-                    rate_signal.has_recent_rate
-                    and rate > 0.0
-                    and (
-                        int(_cb_mh_value(row, "new_su", 0) or 0) > 0
-                        or recent_su_for_expected > 0
-                    )
-                )
-                else (
-                    "rescue"
+        out.append(
+            ActionCandidate(
+                candidate_id=f"route_replay_{tick_tag}_{idx:02d}_{fam}",
+                hypothesis_ids=["route_value_replay"],
+                parent_result_id=None,
+                method_family=fam,
+                operator_id=cap.default_operator_id,
+                lane_id=cap.default_lane_id,
+                config_delta=dict(config_delta),
+                downstream_route_plan=_downstream_score_conversion_plan(fam, cap),
+                estimated_cost_class=cap.default_cost_class,
+                expected_signal=expected,
+                evidence_refs=refs[:4],
+                feasibility=feas,
+                supervisor_mode=(
+                    "exploit"
                     if (
-                        near_recent_for_expected > 0
-                        or int(_cb_mh_value(row, "near_miss_count", 0) or 0) > 0
+                        rate_signal.has_recent_rate
+                        and rate > 0.0
+                        and (
+                            int(_cb_mh_value(row, "new_su", 0) or 0) > 0
+                            or recent_su_for_expected > 0
+                        )
                     )
-                    else "explore"
-                )
-            ),
-        ))
+                    else (
+                        "rescue"
+                        if (
+                            near_recent_for_expected > 0
+                            or int(_cb_mh_value(row, "near_miss_count", 0) or 0) > 0
+                        )
+                        else "explore"
+                    )
+                ),
+            )
+        )
     return out
 
 
@@ -2026,7 +2220,9 @@ def _route_value_record_recent_safe_for_current_signal(
     return dry_gpu_h < float(cfg.route_value_replay_lifetime_stale_dry_gpu_h)
 
 
-def _dominant_route_root_group(evidence: EvidenceSummary, registry: CapabilityRegistry) -> str | None:
+def _dominant_route_root_group(
+    evidence: EvidenceSummary, registry: CapabilityRegistry
+) -> str | None:
     """Root group that has consumed the most generator route GPU-h.
 
     Exact route rows are the trusted source when present. Family rollups are a
@@ -2093,9 +2289,15 @@ def _root_has_current_su(
         fam = _row_family(row)
         if _root_family_group(fam) != root:
             continue
-        if float(_cb_mh_value(row, "gpu_recent_new_su_per_route_gpu_h", 0.0) or 0.0) > 0.0:
+        if (
+            float(_cb_mh_value(row, "gpu_recent_new_su_per_route_gpu_h", 0.0) or 0.0)
+            > 0.0
+        ):
             return True
-        if float(_cb_mh_value(row, "medium_recent_new_su_per_route_gpu_h", 0.0) or 0.0) > 0.0:
+        if (
+            float(_cb_mh_value(row, "medium_recent_new_su_per_route_gpu_h", 0.0) or 0.0)
+            > 0.0
+        ):
             return True
         if int(_cb_mh_value(row, "new_su_recent_gpu", 0) or 0) > 0:
             return True
@@ -2103,9 +2305,20 @@ def _root_has_current_su(
             return True
         if not _route_value_record_recent_safe_for_current_signal(row, evidence, cfg):
             continue
-        if float(_cb_mh_value(row, "record_recent_new_su_per_route_gpu_h", 0.0) or 0.0) > 0.0:
+        if (
+            float(_cb_mh_value(row, "record_recent_new_su_per_route_gpu_h", 0.0) or 0.0)
+            > 0.0
+        ):
             return True
-        if int(_cb_mh_value(row, "record_recent_new_su", _cb_mh_value(row, "new_su_recent", 0)) or 0) > 0:
+        if (
+            int(
+                _cb_mh_value(
+                    row, "record_recent_new_su", _cb_mh_value(row, "new_su_recent", 0)
+                )
+                or 0
+            )
+            > 0
+        ):
             return True
     return False
 
@@ -2127,7 +2340,10 @@ def _deep_stall_recovery_active(evidence: EvidenceSummary, cfg: BuilderConfig) -
         worker_h = float(getattr(evidence, "worker_gpu_h_total", 0.0) or 0.0)
         total_su = int(getattr(evidence, "run_su_count", 0) or 0)
         total_rate = (total_su / worker_h) if worker_h > 0.0 else None
-    if total_rate is not None and float(total_rate) > cfg.deep_stall_recovery_max_total_su_per_gpu_h:
+    if (
+        total_rate is not None
+        and float(total_rate) > cfg.deep_stall_recovery_max_total_su_per_gpu_h
+    ):
         return False
     history = list(getattr(evidence, "recent_ticks_history", None) or [])
     if not history:
@@ -2136,7 +2352,8 @@ def _deep_stall_recovery_active(evidence: EvidenceSummary, cfg: BuilderConfig) -
     recent = history[-lookback:]
     min_deep = max(1, int(cfg.deep_stall_recovery_min_deep_ticks))
     dry_deep_ticks = sum(
-        1 for item in recent
+        1
+        for item in recent
         if str(item.get("state_label", "")) == "deep_stall"
         and int(item.get("run_su_count_delta", 0) or 0) == 0
     )
@@ -2175,17 +2392,24 @@ def _early_zero_su_cross_family_active(
     return True
 
 
-def _needs_cross_family_escape(evidence: EvidenceSummary, cfg: BuilderConfig, dominant_root: str | None) -> bool:
+def _needs_cross_family_escape(
+    evidence: EvidenceSummary, cfg: BuilderConfig, dominant_root: str | None
+) -> bool:
     state = str(getattr(evidence, "state_label", "") or "")
     dry_h = float(getattr(evidence, "gpu_h_since_last_su", 0.0) or 0.0)
     if state == "deep_stall":
         return not _root_has_current_su(evidence, dominant_root, cfg)
     if state in {"stalled", "strict_duplicate_collapse"}:
-        return dry_h >= cfg.cross_family_probe_warning_dry_gpu_h and not _root_has_current_su(evidence, dominant_root, cfg)
+        return (
+            dry_h >= cfg.cross_family_probe_warning_dry_gpu_h
+            and not _root_has_current_su(evidence, dominant_root, cfg)
+        )
     return False
 
 
-def _cross_family_escape_target(evidence: EvidenceSummary, cfg: BuilderConfig, dominant_root: str | None) -> int:
+def _cross_family_escape_target(
+    evidence: EvidenceSummary, cfg: BuilderConfig, dominant_root: str | None
+) -> int:
     if _needs_cross_family_escape(evidence, cfg, dominant_root):
         return max(0, int(cfg.deep_stall_cross_family_min_probes))
     if _early_zero_su_cross_family_active(evidence, cfg, dominant_root):
@@ -2261,13 +2485,20 @@ def _cross_family_escape_candidates(
         if not root or root == dominant_root or root in existing_roots:
             continue
         row = _family_route_row(evidence, fam)
-        status = str(_cb_mh_value(row, "marginal_status", _cb_mh_value(row, "status", "untried")) or "untried")
+        status = str(
+            _cb_mh_value(row, "marginal_status", _cb_mh_value(row, "status", "untried"))
+            or "untried"
+        )
         route_gpu_h = float(_cb_mh_value(row, "route_gpu_h", 0.0) or 0.0)
         new_su = int(_cb_mh_value(row, "new_su", 0) or 0)
         near_recent = int(_cb_mh_value(row, "near_miss_recent", 0) or 0)
         rate = _route_value_current_rate(row) if row is not None else 0.0
-        diag_score = float(_cb_mh_value(row, "diagnostic_improvement_score", 0.0) or 0.0)
-        diag_credible = diag_score >= float(cfg.cross_family_diagnostic_improvement_min_score)
+        diag_score = float(
+            _cb_mh_value(row, "diagnostic_improvement_score", 0.0) or 0.0
+        )
+        diag_credible = diag_score >= float(
+            cfg.cross_family_diagnostic_improvement_min_score
+        )
         credible = (
             status in {"untried", "under_tested", "awaiting_score_conversion"}
             or new_su > 0
@@ -2295,7 +2526,9 @@ def _cross_family_escape_candidates(
             "defer": 11,
             "collapse_risk": 12,
         }.get(status, 13)
-        params = _fallback_diversity_config(cap, str(getattr(evidence, "state_label", "") or ""))
+        params = _fallback_diversity_config(
+            cap, str(getattr(evidence, "state_label", "") or "")
+        )
         su_value_rank = 0 if (new_su > 0 or rate > 0.0) else 1
         score = (
             float(su_value_rank),
@@ -2321,26 +2554,35 @@ def _cross_family_escape_candidates(
         if cap is None:
             continue
         feas = feasibility_for(
-            fam, evidence, cfg, registry=registry,
+            fam,
+            evidence,
+            cfg,
+            registry=registry,
             parent_pdb_available=parent_pdb_available,
         )
-        out.append(ActionCandidate(
-            candidate_id=f"evidence_fallback_cross_family_{tick_tag}_{len(out):02d}_{fam}",
-            hypothesis_ids=["cross_family_escape"],
-            parent_result_id=None,
-            method_family=fam,
-            operator_id=cap.default_operator_id,
-            lane_id=cap.default_lane_id,
-            config_delta=dict(params),
-            downstream_route_plan=_downstream_score_conversion_plan(fam, cap),
-            estimated_cost_class=cap.default_cost_class,
-            expected_signal=(
-                f"cross_family_escape dominant_root={dominant_root or 'unknown'} "
-                f"family={fam} prior_status={status} diagnostic_score={diag_score:.2f}"
-            ),
-            evidence_refs=["route_values", "dry_since_last_SU", "untried_cross_family_candidates"],
-            feasibility=feas,
-        ))
+        out.append(
+            ActionCandidate(
+                candidate_id=f"evidence_fallback_cross_family_{tick_tag}_{len(out):02d}_{fam}",
+                hypothesis_ids=["cross_family_escape"],
+                parent_result_id=None,
+                method_family=fam,
+                operator_id=cap.default_operator_id,
+                lane_id=cap.default_lane_id,
+                config_delta=dict(params),
+                downstream_route_plan=_downstream_score_conversion_plan(fam, cap),
+                estimated_cost_class=cap.default_cost_class,
+                expected_signal=(
+                    f"cross_family_escape dominant_root={dominant_root or 'unknown'} "
+                    f"family={fam} prior_status={status} diagnostic_score={diag_score:.2f}"
+                ),
+                evidence_refs=[
+                    "route_values",
+                    "dry_since_last_SU",
+                    "untried_cross_family_candidates",
+                ],
+                feasibility=feas,
+            )
+        )
         used_roots.add(root)
         if len(out) >= need:
             break
@@ -2367,21 +2609,18 @@ def build_candidates(
     joint_fail_parent_ids = _joint_fail_only_representative_ids(evidence)
     joint_fail_parent_source_families = _joint_fail_parent_source_families(evidence)
     parent_source_families = _parent_source_family_map(evidence)
-    # rec 4 (2026-05-30): parents the give-up floor flagged as stuck. A candidate
-    # that would REFINE one of these (parent_result_id in the set) is marked
-    # infeasible below so budget flows to fresh generation instead.
-    # GAP 2 (2026-06-13): per-(parent, rescue-family) exhaustion. Map
-    # parent_result_id -> set of EXHAUSTED rescue families. An EMPTY set means
-    # "block ALL refinement of this parent" (regenerate; pLDDT-stuck or mined-out
-    # arms); a non-empty set blocks only those families, leaving an untried rescue
-    # family free to attempt the same parent before full regeneration.
+    # An empty exhausted-family set blocks all refinement of a parent. A nonempty set
+    # blocks only the listed families, leaving other refinements available.
     stuck_exhausted: dict[str, set[str]] = {}
-    for e in (getattr(evidence, "stuck_lineage_roots", None) or []):
+    for e in getattr(evidence, "stuck_lineage_roots", None) or []:
         if isinstance(e, dict) and e.get("root_result_id"):
-            stuck_exhausted[e["root_result_id"]] = set(e.get("exhausted_families") or [])
+            stuck_exhausted[e["root_result_id"]] = set(
+                e.get("exhausted_families") or []
+            )
     stuck_set = set(stuck_exhausted)  # back-compat: membership = parent is flagged
     parent_artifact_ids = {
-        str(x) for x in (getattr(evidence, "parent_artifact_result_ids", None) or [])
+        str(x)
+        for x in (getattr(evidence, "parent_artifact_result_ids", None) or [])
         if str(x)
     }
     out: list[ActionCandidate] = []
@@ -2390,17 +2629,23 @@ def build_candidates(
     # These do not depend on LLM output and ensure that even a Planner fallback
     # leaves us with one Complexa, one BoltzGen, and one BindCraft root probe.
     if include_warmstart:
-        out.extend(_warmstart_candidates(
-            evidence, cfg, registry,
-            has_llm_hypotheses=bool(hypotheses),
-            parent_pdb_available=parent_pdb_available,
-            completed_families=warmstart_completed_families,
-        ))
+        out.extend(
+            _warmstart_candidates(
+                evidence,
+                cfg,
+                registry,
+                has_llm_hypotheses=bool(hypotheses),
+                parent_pdb_available=parent_pdb_available,
+                completed_families=warmstart_completed_families,
+            )
+        )
 
-    if (include_warmstart
-            and evidence.state_label == "low_evidence"
-            and not evidence.recipes
-            and out):
+    if (
+        include_warmstart
+        and evidence.state_label == "low_evidence"
+        and not evidence.recipes
+        and out
+    ):
         # Cost-aware cold start is deterministic before any target evidence exists.
         # Planner/Supervisor control resumes after every enabled cold-start family
         # has been selected; partial-slot ticks emit only the missing families.
@@ -2420,8 +2665,13 @@ def build_candidates(
             op = cap.default_operator_id
             lane = cap.default_lane_id
             cost = cap.default_cost_class
-            feas = feasibility_for(fam, evidence, cfg, registry=registry,
-                                    parent_pdb_available=parent_pdb_available)
+            feas = feasibility_for(
+                fam,
+                evidence,
+                cfg,
+                registry=registry,
+                parent_pdb_available=parent_pdb_available,
+            )
             if cap is not None and cap.outputs_diagnostic_only:
                 if _hypothesis_requests_existing_score_backlog(h):
                     feas = _with_feasibility_reason(
@@ -2437,15 +2687,9 @@ def build_candidates(
                         route_cap_ok=False,
                     )
 
-            # B-010 fix (2026-05-26): partial-accept LLM config_delta. The
-            # earlier strict-all policy dropped the whole dict on any single
-            # invalid key (LLM commonly mixes valid `temperature=0.05` with
-            # hallucinated `steering_weight=8.0`), so every Complexa launch
-            # ran with default config regardless of the LLM's tuning intent.
-            # Now: keep valid keys, drop only invalid ones. Eval-budget breach
-            # is repaired when possible and otherwise remains an explicit
-            # infeasible candidate. Never silently launch an intended config as
-            # `{}`; that was a critical hidden no-op failure mode.
+            # Keep valid settings and repair evaluation-budget overshoots when possible.
+            # An unrepairable proposal remains explicitly infeasible rather than
+            # silently reverting to defaults.
             suggested = h.config_delta_suggestions.get(fam, {})
             dropped_config_reasons: list[str] = []
             if cap is not None and suggested:
@@ -2471,27 +2715,28 @@ def build_candidates(
                     cost_ok=False if hard_reject else None,
                 )
 
-            # rec 3 (2026-05-30): axis-matched config SOFT-DEFAULT. When the LLM
-            # named a family to fix a bottleneck but gave NO config tuning, seed a
-            # remediation knob matched to the hypothesis's dominant axis so the
-            # launch targets the diagnosed component instead of running plain
-            # defaults. Fires ONLY when config_delta is empty (LLM tuning always
-            # wins) and only for families exposing the knob. pLDDT (structural)
-            # has no fixed-backbone fix → left to the give-up/regenerate floor.
-            # NB: `not suggested` => the LLM gave NO config for this family. An
-            # attempted-but-invalid suggestion that validated to {} is left empty,
-            # not overridden by this soft-default. Also require a REAL axis
-            # diagnosis (h.predicted_metric_changes) so we never seed off the
-            # fallback primary_axis="iPAE" when the hypothesis predicted nothing.
+            # Supply an axis-matched default only when the card predicts a measurement
+            # change and provides no settings for this family. Do not replace an
+            # attempted but invalid setting.
             soft_defaulted = False
-            if (not config_delta and not suggested and cap is not None
-                    and h.predicted_metric_changes):
+            if (
+                not config_delta
+                and not suggested
+                and cap is not None
+                and h.predicted_metric_changes
+            ):
                 ap = cap.allowed_params or {}
                 if primary_axis == "binder_scRMSD" and "refinement_algorithm" in ap:
                     seed_cfg = {"refinement_algorithm": "sequence_hallucination"}
                 elif primary_axis == "iPAE" and "sc_scale_noise" in ap:
-                    adaptive_noise = _adaptive_complexa_sc_scale_noise(evidence, primary_axis, cap)
-                    seed_cfg = {"sc_scale_noise": adaptive_noise} if adaptive_noise is not None else {"sc_scale_noise": 0.30}
+                    adaptive_noise = _adaptive_complexa_sc_scale_noise(
+                        evidence, primary_axis, cap
+                    )
+                    seed_cfg = (
+                        {"sc_scale_noise": adaptive_noise}
+                        if adaptive_noise is not None
+                        else {"sc_scale_noise": 0.30}
+                    )
                 else:
                     seed_cfg = {}
                 if seed_cfg:
@@ -2500,8 +2745,9 @@ def build_candidates(
 
             pre_autopair_cfg_key = json.dumps(dict(config_delta), sort_keys=True)
             pre_autopair_joint_fail = (
-                (op, pre_autopair_cfg_key) in failed_sigs and not soft_defaulted
-            )
+                op,
+                pre_autopair_cfg_key,
+            ) in failed_sigs and not soft_defaulted
 
             if fam.startswith("complexa_") and config_delta:
                 greedy_requested = (
@@ -2509,20 +2755,27 @@ def build_candidates(
                     or bool(config_delta.get("enable_greedy_optimization", False))
                     or "greedy_percentage" in config_delta
                 )
-                if (greedy_requested
-                        and config_delta.get("refinement_algorithm") != "sequence_hallucination"
-                        and cap is not None
-                        and "refinement_algorithm" in (cap.allowed_params or {})):
+                if (
+                    greedy_requested
+                    and config_delta.get("refinement_algorithm")
+                    != "sequence_hallucination"
+                    and cap is not None
+                    and "refinement_algorithm" in (cap.allowed_params or {})
+                ):
                     config_delta = dict(config_delta)
                     config_delta["refinement_algorithm"] = "sequence_hallucination"
                     feas = _with_feasibility_reason(
                         feas,
                         "config_delta_adjusted:auto_set:refinement_algorithm=sequence_hallucination_for_greedy_knobs",
                     )
-                elif (cap is not None
-                        and "refinement_algorithm" in (cap.allowed_params or {})
-                        and not any(str(k).startswith("reward_") for k in config_delta)
-                        and _should_pair_complexa_sequence_hallucination(evidence, primary_axis, config_delta)):
+                elif (
+                    cap is not None
+                    and "refinement_algorithm" in (cap.allowed_params or {})
+                    and not any(str(k).startswith("reward_") for k in config_delta)
+                    and _should_pair_complexa_sequence_hallucination(
+                        evidence, primary_axis, config_delta
+                    )
+                ):
                     config_delta = dict(config_delta)
                     config_delta["refinement_algorithm"] = "sequence_hallucination"
                     feas = _with_feasibility_reason(
@@ -2530,13 +2783,16 @@ def build_candidates(
                         "config_delta_adjusted:auto_pair:refinement_algorithm=sequence_hallucination_for_complexa_rescue",
                     )
 
-                # T-ReX reward timing: reward weights are diagnostic levers, not
+                # T-REX reward timing: reward weights are diagnostic levers, not
                 # the first search perturbation. Sparse evidence defers reward_*
                 # and launches an axis-matched material search tweak first;
                 # evidence-rich reward configs remain valid, but exact
                 # reward-only retries get a material search knob as well.
                 if cap is not None and config_delta:
-                    repaired_delta, reward_timing_reasons = _repair_complexa_reward_timing(
+                    (
+                        repaired_delta,
+                        reward_timing_reasons,
+                    ) = _repair_complexa_reward_timing(
                         config_delta,
                         evidence=evidence,
                         primary_axis=primary_axis,
@@ -2545,11 +2801,13 @@ def build_candidates(
                         cfg=cfg,
                     )
                     if reward_timing_reasons:
-                        config_delta, dropped_after_reward_timing = validate_config_delta_partial(
-                            cap, repaired_delta
-                        )
+                        (
+                            config_delta,
+                            dropped_after_reward_timing,
+                        ) = validate_config_delta_partial(cap, repaired_delta)
                         reasons = reward_timing_reasons + [
-                            f"post_reward_timing_drop:{r}" for r in dropped_after_reward_timing
+                            f"post_reward_timing_drop:{r}"
+                            for r in dropped_after_reward_timing
                         ]
                         feas = _with_feasibility_reason(feas, "|".join(reasons))
 
@@ -2582,29 +2840,14 @@ def build_candidates(
                         route_cap_ok=False,
                     )
 
-            # llm-004 (2026-06-18): now that config_delta is budget-final, re-check
-            # the remaining-wall gate scaled by the config's eval-budget. The base
-            # feasibility_for gate is config-blind (flat FAMILY_RUNTIME_H), so a
-            # heavy-config generator could pass it near end-of-run and then be
-            # wall-killed. Only restricts heavy configs (mult>1); default configs
-            # already passed the base gate unchanged.
+            # Recheck remaining time after settings and evaluation budget are finalized.
             if feas.cost_ok and config_delta:
                 _wall_reason = _scaled_wall_reason(fam, config_delta, evidence)
                 if _wall_reason:
                     feas = _with_feasibility_reason(feas, _wall_reason, cost_ok=False)
 
-            # Q3 feedback: if this exact (operator, config) signature appears
-            # as a joint_fail recipe in the current evidence, attach a caution
-            # reason but do NOT make the candidate infeasible. Stochastic search
-            # can need more samples, and the Planner prompt explicitly treats
-            # strategy_feedback as scoped feedback rather than a ban list.
-            # C-10 fix (2026-05-30): EXEMPT the rec-3 soft-default from this dedup.
-            # The dedup exists to stop re-running configs the LLM PROPOSED and that
-            # failed; the soft-default is the builder's fixed fallback, so once it
-            # lands in joint_fail it would hard-block EVERY future un-tuned card on
-            # that operator — funnelling all un-tuned remediation into one
-            # permanently dead config. The LLM's own (deduped) tuning still wins,
-            # and the give-up floor (rec 4) bounds a backbone that keeps failing.
+            # A previously failed configuration receives a caution, not a hard ban.
+            # Exempt controller-supplied defaults from this proposal-specific feedback.
             cfg_key = json.dumps(dict(config_delta), sort_keys=True)
             final_joint_fail = (op, cfg_key) in failed_sigs and not soft_defaulted
             if final_joint_fail or pre_autopair_joint_fail:
@@ -2616,23 +2859,16 @@ def build_candidates(
                     verifier_ok=feas.verifier_ok,
                     route_cap_ok=feas.route_cap_ok,
                     cost_ok=feas.cost_ok,
-                    reasons=list(feas.reasons) + [
-                        f"prior_joint_fail_caution_not_ban:({op},{caution_key[:50]})"
-                    ],
+                    reasons=list(feas.reasons)
+                    + [f"prior_joint_fail_caution_not_ban:({op},{caution_key[:50]})"],
                 )
 
             seq += 1
-            # E-feedback fix (2026-05-26): include tick_id prefix in
-            # candidate_id so a re-candidated active hypothesis in a later
-            # tick doesn't collide with its first-tick candidate. Previous
-            # construction was `cand_{hypothesis_id}_{seq:03d}`, and `seq`
-            # resets each build_candidates call — hyp_0001_00 reaching the
-            # builder in both tick 1 and tick 5 would yield two distinct
-            # ActionCandidate records sharing the same candidate_id, which
-            # downstream lookups (phase5_launcher, audit by id) treat as a
-            # single entity.
+            # Include the tick in candidate IDs because an active hypothesis can recur.
             tick_tag = evidence.tick_id or "t000"
-            _refines_parent = cap is not None and getattr(cap, "requires_parent_pdb", False)
+            _refines_parent = cap is not None and getattr(
+                cap, "requires_parent_pdb", False
+            )
             baseline_rid = _resolve_baseline_result_id(h, evidence)
             _baseline_refs, baseline_conflict = _shared_baseline_refs(h)
             if baseline_conflict:
@@ -2650,7 +2886,9 @@ def build_candidates(
                 if parent_rid is None:
                     feas = _with_feasibility_reason(
                         feas,
-                        f"{parent_reason}:{fam}" if parent_reason else f"no_concrete_parent_result_id:{fam}",
+                        f"{parent_reason}:{fam}"
+                        if parent_reason
+                        else f"no_concrete_parent_result_id:{fam}",
                         compiler_ok=False,
                     )
                 elif parent_rid not in parent_artifact_ids:
@@ -2659,13 +2897,11 @@ def build_candidates(
                         f"no_usable_parent_artifact:{parent_rid}:{fam}",
                         compiler_ok=False,
                     )
-                elif (
-                    mismatch_reason := _parent_source_mismatch_reason(
-                        hypothesis=h,
-                        action_family=fam,
-                        parent_result_id=parent_rid,
-                        parent_source_families=parent_source_families,
-                    )
+                elif mismatch_reason := _parent_source_mismatch_reason(
+                    hypothesis=h,
+                    action_family=fam,
+                    parent_result_id=parent_rid,
+                    parent_source_families=parent_source_families,
                 ):
                     feas = _with_feasibility_reason(
                         feas,
@@ -2704,12 +2940,17 @@ def build_candidates(
                         compiler_ok=False,
                     )
                 elif parent_rid in joint_fail_parent_ids:
-                    source_families = joint_fail_parent_source_families.get(parent_rid, set())
+                    source_families = joint_fail_parent_source_families.get(
+                        parent_rid, set()
+                    )
                     score_conversion = False
                     if fam == "structure_refilter":
                         for source_family in source_families:
                             source_cap = registry.get(source_family)
-                            if source_cap is not None and source_cap.outputs_diagnostic_only:
+                            if (
+                                source_cap is not None
+                                and source_cap.outputs_diagnostic_only
+                            ):
                                 score_conversion = True
                                 break
                     if not score_conversion:
@@ -2729,30 +2970,28 @@ def build_candidates(
                             verifier_ok=feas.verifier_ok,
                             route_cap_ok=feas.route_cap_ok,
                             cost_ok=feas.cost_ok,
-                            reasons=list(feas.reasons) + [
-                                f"joint_fail_parent_caution_bounded_probe:{parent_rid}"
-                            ],
+                            reasons=list(feas.reasons)
+                            + [f"joint_fail_parent_caution_bounded_probe:{parent_rid}"],
                         )
-            # rec 4: a candidate that would REFINE a stuck backbone is marked
-            # infeasible (still emitted, so the LLM's intent stays auditable) —
-            # the Selector then spends budget on fresh generation, and the
-            # Planner is told to regenerate from scratch. Refilter/MPNN on a
-            # repeatedly non-improving parent is the polishing loop this prevents.
-            # C-2 fix (2026-05-30): ONLY block families that actually consume the
-            # parent backbone (requires_parent_pdb: refilter / seq_redesign). A
-            # de-novo generator (complexa_*/bindcraft, requires_parent_pdb=False)
-            # that merely CITES the stuck parent as lineage/evidence is a fresh
-            # regeneration — the exact action the give-up floor wants — so it must
-            # NOT be blocked.
-            if parent_rid is not None and parent_rid in stuck_exhausted and _refines_parent:
-                # GAP 2: block only if this rescue family is exhausted on the
-                # parent, OR the exhausted set is empty (= block all / regenerate).
+            # Block exhausted-parent refinements only for families that consume the
+            # parent structure. Generators may cite the same parent as evidence while
+            # creating a new backbone.
+            if (
+                parent_rid is not None
+                and parent_rid in stuck_exhausted
+                and _refines_parent
+            ):
+                # Block all refinements for an empty exhausted set, or only the
+                # listed families.
                 _exh = stuck_exhausted[parent_rid]
                 if not _exh or fam in _exh:
                     feas = _with_feasibility_reason(
                         feas,
-                        (f"lineage_stuck_regenerate:{parent_rid}" if not _exh
-                         else f"rescue_exhausted:{parent_rid}:{fam}"),
+                        (
+                            f"lineage_stuck_regenerate:{parent_rid}"
+                            if not _exh
+                            else f"rescue_exhausted:{parent_rid}:{fam}"
+                        ),
                         route_cap_ok=False,
                     )
             out.append(
@@ -2772,9 +3011,7 @@ def build_candidates(
                         _downstream_score_conversion_plan(fam, cap)
                     ),
                     estimated_cost_class=cost,
-                    expected_signal=(
-                        f"{fam} expected to improve {primary_axis}"
-                    ),
+                    expected_signal=(f"{fam} expected to improve {primary_axis}"),
                     evidence_refs=list(h.evidence_refs),
                     feasibility=feas,
                     baseline_result_id=baseline_rid,
@@ -2783,7 +3020,11 @@ def build_candidates(
             )
 
     i4 = _diagnostic_i4_mcts_candidates(
-        evidence, cfg, registry, out, parent_pdb_available=parent_pdb_available,
+        evidence,
+        cfg,
+        registry,
+        out,
+        parent_pdb_available=parent_pdb_available,
     )
     if i4:
         out.extend(i4)
@@ -2793,18 +3034,23 @@ def build_candidates(
         and c.parent_result_id is not None
         and (
             c.method_family in {"proteinmpnn_redesign"}
-            or (c.method_family == "structure_refilter" and _is_material_parent_model_refold(c.config_delta))
+            or (
+                c.method_family == "structure_refilter"
+                and _is_material_parent_model_refold(c.config_delta)
+            )
         )
         for c in out
     )
     if not has_feasible_parent_bound_rescue:
-        out.extend(_route_value_replay_candidates(
-            evidence,
-            cfg,
-            registry,
-            out,
-            parent_pdb_available=parent_pdb_available,
-        ))
+        out.extend(
+            _route_value_replay_candidates(
+                evidence,
+                cfg,
+                registry,
+                out,
+                parent_pdb_available=parent_pdb_available,
+            )
+        )
 
     # Deep-stall / weak-recovery escape floor: if the LLM keeps proposing only
     # the dominant root family while it is dry, or after a low-yield run just
@@ -2812,15 +3058,19 @@ def build_candidates(
     # root-family probes. Recovery uses a smaller floor so the fresh-SU route is
     # still exploitable.
     cross = _cross_family_escape_candidates(
-        evidence, cfg, registry, out, parent_pdb_available=parent_pdb_available,
+        evidence,
+        cfg,
+        registry,
+        out,
+        parent_pdb_available=parent_pdb_available,
     )
     if cross:
         seen = {
-            (c.method_family, json.dumps(c.config_delta, sort_keys=True))
-            for c in out
+            (c.method_family, json.dumps(c.config_delta, sort_keys=True)) for c in out
         }
         out.extend(
-            c for c in cross
+            c
+            for c in cross
             if (c.method_family, json.dumps(c.config_delta, sort_keys=True)) not in seen
         )
 
@@ -2835,18 +3085,24 @@ def build_candidates(
             for c in cands
         )
 
-    if evidence.state_label in ("stalled", "deep_stall", "strict_duplicate_collapse") and not _has_escape(out):
+    if evidence.state_label in (
+        "stalled",
+        "deep_stall",
+        "strict_duplicate_collapse",
+    ) and not _has_escape(out):
         forced = _warmstart_candidates(
-            evidence, cfg, registry,
+            evidence,
+            cfg,
+            registry,
             has_llm_hypotheses=False,  # force fallback regardless of card count
             parent_pdb_available=parent_pdb_available,
         )
         seen = {
-            (c.method_family, json.dumps(c.config_delta, sort_keys=True))
-            for c in out
+            (c.method_family, json.dumps(c.config_delta, sort_keys=True)) for c in out
         }
         out.extend(
-            c for c in forced
+            c
+            for c in forced
             if (c.method_family, json.dumps(c.config_delta, sort_keys=True)) not in seen
         )
 

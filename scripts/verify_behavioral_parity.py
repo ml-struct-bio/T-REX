@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify deterministic parity between the private source snapshot and T-ReX.
+"""Verify deterministic parity between the private source snapshot and T-REX.
 
 This check is read-only with respect to the source tree. Python bytecode and
 pytest caches are redirected or disabled, and all reports are written beneath
@@ -63,55 +63,85 @@ POLICY_MODULES = (
 # passing source/release suites, so an allowlisted structural difference is not
 # sufficient on its own.
 APPROVED_STANDALONE_DIVERGENCES: dict[str, dict[str, str]] = {
+    "diagnosis_outcome.py": {
+        "source_ast_sha256": "68989fd04ae67a1f1df45df5009a11185aea9ca747d865b453c241e24bd9471e",
+        "trex_ast_sha256": "09e85cea9dcb443f58045f883c6ac8fd266a77132163e7bbb03605aa71860728",
+        "reason": "Clarify documentation; executable statements and prompt strings are unchanged",
+    },
+    "candidate_builder.py": {
+        "source_ast_sha256": "2d84ecb54a6c814cfd86f2e4ecbddce3dca8e8bacf789f987bd341104bcf97b2",
+        "trex_ast_sha256": "03a1011df7dce4e52b24ec421446659dfa55d529d6fe450666cd41506a86deb9",
+        "reason": "Clarify documentation; executable statements and prompt strings are unchanged",
+    },
+    "critic_guard.py": {
+        "source_ast_sha256": "6e4e18e590c8dc4c93d7b60abe16a9879d236fa061559a71357a3de02d54c6a4",
+        "trex_ast_sha256": "1783adf1414d7c90d415da72392dc02008cf2affe57d11aaf05b5a7486a02682",
+        "reason": "Clarify documentation; executable statements and prompt strings are unchanged",
+    },
+    "lifecycle.py": {
+        "source_ast_sha256": "b70820e38dcdaf964e632875355af6bf36775c6cc8946ba35b736f30cf7eeb1f",
+        "trex_ast_sha256": "ebc2bbd1cab6034044ee5c2da1e02858c9f4c7c1935c760b21030e94ec8a3668",
+        "reason": "Clarify documentation; executable statements and prompt strings are unchanged",
+    },
+    "prompts.py": {
+        "source_ast_sha256": "3178ccd82c85a1a60f78041711c94be4f7989abc0d7b040bbd7372e0873dc381",
+        "trex_ast_sha256": "9d30bca99b4a6d198befe49195985033a32f1bf9e0353f7a7da3874fb0d8f162",
+        "reason": "Clarify documentation; executable statements and prompt strings are unchanged",
+    },
+    "unified_reasoner.py": {
+        "source_ast_sha256": "eb9799d89bfccea73f0ba3b1520e2d8c5445da62792faf5a6ac5191fdf1ee332",
+        "trex_ast_sha256": "77c9ca049ba2b5a46372e65b4a42a52c588492450e23c377c324676afcce7608",
+        "reason": "Clarify documentation; executable statements and prompt strings are unchanged",
+    },
     "foldseek_clusterer.py": {
         "source_ast_sha256": "50940f3ace8e5bd2a79e462ee39e0fea2c4c645bfc1751f4bfd1fbe9d429cd91",
-        "trex_ast_sha256": "17ff690dcd9ae71bcde80b514c9ee9ecfc0ce934eabda5fa8b0d6935a806f0dd",
-        "reason": "2026-09-17 AF2 prediction-chain identity correction; intentional clustering difference, covered by test_af2_chain_identity.py"
+        "trex_ast_sha256": "fc85873ee7f1c27022318302bd980b1fd0098c669238d96eeda3b7eb36ea8829",
+        "reason": "Verified output roles and first-model extraction; intentional corrections covered by test_output_identity.py, test_output_identity_boundaries.py and test_af2_chain_identity.py"
     },
     "output_parsers/af2_refilter.py": {
         "source_ast_sha256": "03c94c5a1208a036cf86cf0d3de711215f6c31a395b80c650d22387f62728606",
-        "trex_ast_sha256": "61ca80c03b82d823f7bd04865d3d33eb5c7fd9d5b7a1dc4b6845fdb1818d45d7",
-        "reason": "2026-09-17 AF2 prediction-chain identity correction; intentional clustering difference, covered by test_af2_chain_identity.py"
+        "trex_ast_sha256": "2bc47fd3824a411c086d2d3993a714c96535cda4d74c8483e2cb7123f0e3fcca",
+        "reason": "AF2 prediction-chain identity correction; intentional clustering difference, covered by test_af2_chain_identity.py"
     },
     "sequence_clusterer.py": {
         "source_ast_sha256": "a458d559ccfcb1b4189484fef08ee6619181ae2681bbc7145ea32664d6bb11ac",
-        "trex_ast_sha256": "2aa0df5e5478c5bbc0b53131002946bccb3f8bffd4aef91e96c76305ad7335d3",
-        "reason": "2026-09-17 AF2 prediction-chain identity correction; intentional clustering difference, covered by test_af2_chain_identity.py"
+        "trex_ast_sha256": "7c66eb7e16f14c2cc2735e5e30fbb042524f84ee9aea850a6a9d15897a1951cd",
+        "reason": "Verified output binder sequence and consistent first-model extraction; intentional corrections covered by test_output_identity.py, test_output_identity_boundaries.py and test_af2_chain_identity.py"
     },
 
     "critic.py": {
         "source_ast_sha256": "1d91abf071baeda8f4c0c6807fe68ef21c64211cbdbd7beaf6ad56d9f8b897aa",
-        "trex_ast_sha256": "f761826e9f9824fa02596cad045baf8602788d12585645b0aaba86ae5ffb4142",
+        "trex_ast_sha256": "bfb15e2696da80627acacee2ef6405520d53f1142cfaeebceacf0d2f4c5a318a",
         "reason": "extract the exact critic user prompt for the runtime prompt catalog",
     },
     "capability_registry.py": {
         "source_ast_sha256": "fc9f4ce66f17ff1d8c0911f139bac4a10fcacb8e6326cae92b2bb6579a2e779c",
-        "trex_ast_sha256": "fee9b7a3e5e0e409d67eeb89ad44aa7dd9676e2d95d1cef86f3a99d55e4d5efe",
-        "reason": "remove unavailable legacy archive-only refilters while preserving the active eight-family registry",
+        "trex_ast_sha256": "660ac42cd580b81138a249c640d3af2dc5e466938ac0f5179e66fb7a3fa39c64",
+        "reason": "remove unavailable legacy archive-only refilters and obsolete plan-section references in external-family prompt notes while preserving active eight-family policy bounds",
     },
     "evidence_reducer.py": {
         "source_ast_sha256": "5a994cccd551d5bdda67fe6eb1fe0ed7446a9cfb661d49316bf3bfc06d330e3c",
-        "trex_ast_sha256": "6a6995ac09d391971a58e822fdfa74b5421b76db6a31fec0b71e045bf7b86d58",
+        "trex_ast_sha256": "21f013246b73925f7541d4a61f9031bc86511141a4d221fa13b0749af1d52716",
         "reason": "extract attribution/route phases and remove inactive legacy-refilter presentation while preserving historical accounting",
     },
     "fallback.py": {
         "source_ast_sha256": "c328baaf3b8894df863d526f344caadc0fa0b7d6c6fe99d4c052c447ec146735",
-        "trex_ast_sha256": "06fdc591e1d857a46ffe40afe678d0b50a83c640b5a8cf4b57b080b1c6bd652c",
+        "trex_ast_sha256": "95b28546217a0551e6a8b8436002100e4c823767f3c9ed12eddb975a97c223ba",
         "reason": "clarify the documented low-confidence behavior without changing fallback policy",
     },
     "live_tick.py": {
         "source_ast_sha256": "5c4472d3af2516a28bfc68e989a491b720501a282acd43b7efc9e4e6aa4c4e17",
-        "trex_ast_sha256": "fdaf18f942292246153fd3ac6217558d678608096f1e91bd6fb6a49da8a66042",
-        "reason": "extract typed tick phases behind the compatible live-tick entry point",
+        "trex_ast_sha256": "13b92a30413f385b9f7b03960c7f68fe53c3730ea109256223a3e5ae4d1dbf9d",
+        "reason": "Typed tick extraction plus reference-verified legacy output roles before diversity feedback; intentional correction covered by test_output_identity.py",
     },
     "panel.py": {
         "source_ast_sha256": "74e916b04346d49709c2bff12884d0e7cc6a13ff3e00c40575586151e7614b87",
-        "trex_ast_sha256": "d04618ed76f2fd938b5ba4f56943bfba9d1e5da3cfc4f0b376deb5159d5c26ca",
-        "reason": "require real structure files instead of accepting directory-shaped paths",
+        "trex_ast_sha256": "bff420465132eb52789e778295df0ef426c3e0ab631cbbf033a4c6bfd9abc67a",
+        "reason": "Require real structure files and exclude explicitly unresolved output chain identities; covered by test_output_identity.py",
     },
     "planner.py": {
         "source_ast_sha256": "c04035f479a77770748548f4dd9efafae1a091d571bbc3244804fd2a73e970c1",
-        "trex_ast_sha256": "be3c435fe33ffa4f5a7868f7981cb0cbdab340ade479851d95a0cb6dd6e9f439",
+        "trex_ast_sha256": "0d0a118ce087933ddb12c0838ab8176538a7c8197599b281f45d5c64ff78fd65",
         "reason": "expose prompt helpers, add opt-in audited memory and remove redundant filtering for absent legacy refilters",
     },
     "refilter_roles.py": {
@@ -121,22 +151,22 @@ APPROVED_STANDALONE_DIVERGENCES: dict[str, dict[str, str]] = {
     },
     "schemas.py": {
         "source_ast_sha256": "782a43883fe178ddddd1ca4e11f58798ee66da15a14775479359c0105aa92570",
-        "trex_ast_sha256": "1027e58b7b602392801ce544cff78a9993f3dbdae780af22814b5b51a8efd15c",
+        "trex_ast_sha256": "bc3bee2b113008633d0d51b94b0d3a06216d093fc55a9d1e4850e524c6617985",
         "reason": "remove inactive legacy-refilter schema vocabulary from the public interface",
     },
     "selector.py": {
-        "source_ast_sha256": "a1862b386ce03657c38a4218f834e27c5e6f39edcc279d5f58b6f521c1ea0b04",
-        "trex_ast_sha256": "a8fd9095d707d45b7e44a406ad29d833d764ef9118e17e267af595cdc7502502",
-        "reason": "extract typed selection phases behind the compatible selector entry point",
+        "source_ast_sha256": "ada9f1e4ac9d3d2680a0bf4a5b7756d4d02c6c6f10b272d73131ca093db25975",
+        "trex_ast_sha256": "be00d0da85f4216887c1f8c970af80658882ea7f656ae818e2e208227499feb1",
+        "reason": "extract typed selection phases behind the compatible selector entry point; the reviewed source also removes inactive chai_refilter/boltz_refilter branches, leaving the active eight-family policy unchanged",
     },
     "success_criteria.py": {
         "source_ast_sha256": "c9b09b8fe4f3b619753179cff679fbf85e9d66e98adbdb1d817d083b25534589",
-        "trex_ast_sha256": "15bee6e4c3f44060de5f68aad0bc80a9b6b28585f12a512243c44c4032307c6d",
+        "trex_ast_sha256": "3225bfda25430d77ee782d84e9b867f1d9cb7cab1dd8a6a8ea64e903d768f0ae",
         "reason": "clarify canonical AF2 scoring and current BoltzGen terminology without changing thresholds",
     },
     "supervisor.py": {
         "source_ast_sha256": "15f5a389fcd367c9e1288fd3fedeaced525b38e66a5a32163d79daa778a6d311",
-        "trex_ast_sha256": "4817a03b509a671acdcb68d582f5d1847300429ef720ef25f14a52d63de741bd",
+        "trex_ast_sha256": "692f63f99c687c294b5aeb81a140aeb977763f6f8daa1cc9f99967bef9c355c5",
         "reason": "extract prompt/repair helpers and add opt-in audited memory",
     },
 }
@@ -176,7 +206,7 @@ class _NameNormalizer(ast.NodeTransformer):
         value = value.replace("TREX_REPO_ROOT", "V7_AR_REPO")
         value = value.replace("TREX_EXTERNAL_ROOT", "V7_SUBGIT_ROOT")
         value = value.replace("TREX_", "V7_")
-        value = value.replace("T-ReX", "__TREX_BRAND__")
+        value = re.sub(r"T-REX", "__TREX_BRAND__", value, flags=re.IGNORECASE)
         value = re.sub(
             r"\bV7(?:\.3(?:\.3)?)?\b(?!\.\d)",
             "__TREX_BRAND__",
@@ -246,8 +276,9 @@ def _ast_comparison_status(
 # These maintenance-only modules have no corresponding frozen package file.
 # Pin their implementation; an unreviewed change must fail the compatibility gate.
 MAINTENANCE_MODULE_SHA256 = {
-    "af2_chain_identity.py": "c7c677bfccdbccc52e405877db3a4c9a1b7eda54d39e8a444bdc194224771fc6",
-    "af2_refilter_runner.py": "6a6ee2fc565c4d45f0390fb51b3272411137091c4c42e9e51f59264e0f5b81e9"
+    "output_identity.py": "213de56bf327e843498337865165e9701eb1090d95c6e5e363a40988e6377af0",
+    "af2_chain_identity.py": "350566c1073262284f6387a485739ff993151035a9e6d9b325ceadc4335320ae",
+    "af2_refilter_runner.py": "f58091fbde3b48995994bdbf2aad050f55865bca46dafcfd87b13d18f02b1c3f"
 }
 
 

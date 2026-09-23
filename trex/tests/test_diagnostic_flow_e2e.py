@@ -114,7 +114,6 @@ def test_all_diagnostic_axes_reach_the_reducer():
     for axis in ("interface_dG", "shape_complementarity", "ipTM", "min_ipae",
                  "design_to_target_iptm", "design_ptm"):
         assert axis in das, f"{axis} missing from diagnostic_axis_stats"
-    # two-tier fields populated (not the old single-tier shape)
     iptm = das["ipTM"]
     assert iptm.quality_threshold is not None
     assert iptm.pass_threshold is not None
@@ -256,8 +255,7 @@ def test_prompt_form_tldr_units_and_denoising():
     assert "state=" in head and "run_SU=" in head
     assert "pLDDT 0-100" in head                  # units stated up top
     view = build_evidence_for_prompt(ev)
-    # name-lie fixed in the LLM view; route-attribution window now lives
-    # inside objective_summary instead of as another top-level denominator.
+    # The completed-worker compute window belongs under objective_summary in the prompt.
     assert "worker_gpu_h_last_3_ticks" not in view
     assert "worker_gpu_h_window" not in view
     assert "completed_worker_gpu_h_window" in view["objective_summary"]
@@ -289,7 +287,7 @@ def test_supervisor_payload_sees_all_diagnostics():
     )
     payload = build_critic_payload(ev, planner_stub)
     das = payload["diagnostic_axis_stats"]
-    # Supervisor now sees the FULL two-tier view, not just {pass, median}
+    # The Supervisor receives the full acceptance and advisory-quality view.
     assert "ipTM" in das
     for field in ("near_pass", "fail", "below_accept", "quality_threshold"):
         assert field in das["ipTM"], f"critic missing diagnostic field {field}"

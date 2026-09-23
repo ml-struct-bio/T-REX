@@ -1,303 +1,171 @@
 # Outputs and analysis
 
-Every campaign uses an append-only archive. Per-job outputs and links are under
-`worker_outputs/`; recorded artifact references identify the available files.
-Controller records are separated by type into JSONL
-streams so proposals, selection, dispatch, scoring, and outcomes can be audited
-without parsing console logs.
-
-Start with the [result interpretation guide](result-interpretation.md) for the
-difference between recorded counts, missing observations, and reproduction
-claims. Prefer versioned JSON for scripts; human-readable labels may be clarified
-without changing the JSON schema or archived data.
-
-## Read-only campaign summary
+Use the actual run directory created by the [Slurm launcher](slurm.md):
 
 ```bash
-trex-analyze summary --archive-root /path/to/archive
-trex-analyze summary --archive-root /path/to/archive --json
+TREX_RUN_ARCHIVE=/absolute/path/to/trex_cd45_s0_TIMESTAMP/JOB_ID
 ```
 
-JSON summaries use schema `trex.analysis-summary.v1`. The legacy
-`llm_usage.calls` and `llm_usage.by_role.<role>.calls` fields count parsed archive
-records, **not API invocations**. They can include deterministic advisory guard
-records and skipped decisions. Human-readable output labels this value
-`LLM records: count=...`; JSON names and values remain unchanged.
+## Files to inspect
 
-Token totals are sums of recorded values, not independently verified provider
-billing. Missing token values contribute zero to this legacy summary, so a zero
-total is not proof that a model request never occurred. Inspect each record's
-`role`, `model`, and `parse_status` when interpreting usage.
-
-The live summary rate uses `worker_wall_gpu_h_total`, not reserved allocation hours.
-`worker_gpu_h_total` is completed-job cost used for route attribution.
-Raw reserved-allocation metadata may be present in archives for audit, but it
-is not reported as a SU/GPU-hour rate.
-
-The summary reads the latest recorded evidence; it does not recompute a final
-publication endpoint from all generated artifacts. The fixed paper denominator
-and the live measured denominator have separate meanings. A newly created
-archive may not yet contain result or evidence streams. Missing measurements
-are not zeros, and a valid empty archive is not evidence of a completed run.
-
-The summary also reports:
-
-- strict and structure-unique counts;
-- Foldseek status, coverage, and binder-chain scope;
-- sequence clustering status;
-- results and exits by backend family;
-- launch and dispatch realization;
-- started actions by family and exploit/rescue/explore mode; and
-- LLM input/output tokens separately, including role-level totals.
-
-`dispatch_status` is the literal immutable archive vocabulary. The additional
-`dispatch_outcome` count is the operator-facing interpretation: it separates
-`capacity_deferred` and `cancelled_before_start` from genuine
-`dispatch_failed` rows while retaining the raw count for compatibility. The
-same derived `outcome` appears beside raw `status` in JSON decision traces.
-
-## Archive integrity
-
-```bash
-trex-analyze validate --archive-root /path/to/archive
-trex-analyze validate --archive-root /path/to/archive --json
-```
-
-The versioned validation payload (`trex.archive-validation.v1`) checks malformed
-JSON, required dataclass fields, duplicate result IDs, mixed target IDs,
-unsupported provenance versions, prompt hashes, and campaign input/resolved
-artifact hashes. It rejects panels that reference absent results and classifies
-polymorphic `ResultRecord.parent_ids` tokens for downstream lineage analysis.
-Warnings identify absent optional streams, unmatched legacy joins, incomplete
-Foldseek coverage, or an unavailable sequence-diversity pass.
-
-Deterministic candidate origins such as `warmstart`, `evidence_fallback`, and
-`route_value_replay` are not HypothesisCard foreign keys. Validation recognizes
-the fixed system-origin vocabulary and still warns for every other unresolved
-`hypothesis_ids` value.
-
-## Evidence-linked decision trace
-
-```bash
-trex-analyze trace --archive-root /path/to/archive --limit 10
-trex-analyze trace --archive-root /path/to/archive --limit 10 --json
-```
-
-The default is a concise human view. `--json` returns versioned
-`trex.decision-trace.v1` envelope with `trex.decision-trace-entry.v1` entries,
-including an explicit empty `entries` array when no trace is available.
-
-For each recent tick the output joins:
-
-- state class and diagnostic driver;
-- concise `HypothesisCard` claim and structured reasoning trace;
-- Supervisor mode mixture and deterministic clamps;
-- validated action family/configuration, launch decision, and explicit candidate
-  join status (`unique`, `missing`, or `ambiguous`); and
-- actual `DispatchRecord`.
-
-This is the supported audit view for “evidence -> hypothesis -> proposed action
--> validated dispatch.” It does not expose or reconstruct hidden
-chain-of-thought.
-
-## Machine-readable archive contract
-
-```bash
-trex-analyze schema
-trex-analyze schema --json
-```
-
-This contract is generated from the runtime dataclasses. It lists every stream,
-field type, required field, logical key, join key, and cross-stream relationship.
-List-valued keys must be exploded before a tabular join. In particular,
-`parent_ids` is polymorphic: it normally contains a spawning `candidate_id` and
-can also contain an input `result_id`; it must not be treated as a result-only
-foreign key.
-
-## Other machine-readable command contracts
-
-All structured command outputs have a named schema so notebook and workflow
-consumers can reject incompatible changes instead of guessing their shape.
-
-| Command | Output schema |
+| File or directory | Contents |
 | --- | --- |
-| `trex campaign preflight CONFIG --json` | `trex.campaign-preflight.v1` |
-| `trex-validate ... --json` | `trex.installation-validation.v1` |
-| `trex-target list --json` | `trex.target-list.v1` |
-| `trex-target resolve ... --format json` | `trex.resolved-target.v1` |
-| `trex-backend list --json` | `trex.backend-list.v1` |
-| `trex-provenance capture ...` | `trex.provenance-capture.v1` |
+| `result_records.jsonl` | Per-output measurements, execution status, ancestry and artifact paths; includes failures and incomplete results |
+| `evidence_summaries.jsonl` | Full `EvidenceSummary` at each planning update, including quality, novelty, route cost/yield, pending evaluations and workers |
+| `hypothesis_cards.jsonl` | `HypothesisCard` proposals and appended lifecycle updates |
+| `action_candidates.jsonl` | Concrete candidates, parent links, configuration deltas and build checks |
+| `supervisor_decisions.jsonl` | Ranked candidate IDs, allocation mixture and selection context |
+| `llm_call_records.jsonl` | Prompt hashes, model IDs, token use, latency and validation/fallback status; not complete prompt text |
+| `launch_decisions.jsonl` | Queue-admission intent and rejection reasons |
+| `dispatch_records.jsonl` | Actual starts, temporary deferrals and failures, linked to candidate and launch IDs |
+| `panel_selections.jsonl` | Nominated designs and panel checks, when emitted |
+| Optional `metric_calibrations.jsonl`, `runtime_buckets.jsonl`, `target_constraints.jsonl`, `route_records.jsonl` | Additional supported record types; not every campaign writes every stream |
+| `run_provenance*.json`, `repository_patches/` | Source, target, model, software and run settings |
+| `controller_checkpoint.json` | State used for resume |
+| `worker_outputs/` | Per-job logs and most backend outputs, referenced by result records |
+| `$TREX_COMPLEXA_REPO/inference/` (outside the archive) | Complexa's native structures and score tables; the worker log remains in `worker_outputs/` |
+| `vllm.out`, `vllm.err` | LLM server logs |
 
-## Final panel
+JSONL streams append records without overwriting earlier lines. Checkpoints and
+cache files instead describe the latest state and can be replaced. A stream is
+created on its first append; its absence is not by itself a failed run. Use the analysis
+commands for joined views; `trex-analyze schema --json` describes every stream
+and its fields without requiring a separate schema document.
+
+## CD45 record examples and joins
+
+These abbreviated objects illustrate the schema; the numbers and identifiers
+are synthetic and are not experimental CD45 results. Actual files store each
+object on one line and include additional fields. One completed job can append
+several `ResultRecord` objects, and a failed job can retain cost with no metrics.
+
+`result_records.jsonl` excerpt:
+
+```json
+{
+  "result_id": "cd45_eval_example",
+  "target_id": "05_CD45",
+  "tick_id": "tick_000003",
+  "backend_family": "structure_refilter",
+  "parent_ids": ["candidate_eval_example", "cd45_parent_example"],
+  "metrics": {"pLDDT": 92.0, "iPAE": 0.20, "binder_scRMSD": 1.2},
+  "gpu_h": 0.10,
+  "exit_status": "ok",
+  "artifacts": {"pdb": "/outputs/example/worker_outputs/eval_example/predicted.pdb"}
+}
+```
+
+`evidence_summaries.jsonl` excerpt after that result is collected:
+
+```json
+{
+  "tick_id": "tick_000004",
+  "target_id": "05_CD45",
+  "state_label": "low_evidence",
+  "strict_count": 1,
+  "run_su_count": 1,
+  "run_su_count_delta": 1,
+  "foldseek_su_status": "ok",
+  "foldseek_su_coverage": 1.0,
+  "structure_dedup_scope": "binder_chain",
+  "worker_gpu_h_total": 0.4,
+  "worker_wall_gpu_h_total": 0.6,
+  "worker_wall_gpu_count": 3
+}
+```
+
+Here `strict_count` counts qualified designs and `run_su_count` counts qualified
+structural clusters. The latter requires actual successful clustering; passing
+the three metric cutoffs alone does not establish novelty. Missing measurements
+remain missing. `worker_gpu_h_total` aggregates recorded job costs, while
+`worker_wall_gpu_h_total` accounts for elapsed time across worker slots.
+
+Follow `candidate_id` from `action_candidates.jsonl` to launch and dispatch
+records. `hypothesis_ids` on the candidate link to `hypothesis_cards.jsonl`.
+`ResultRecord.parent_ids` can contain both the spawning candidate ID and an
+upstream result ID; match each value to the appropriate stream before joining.
+The result's `tick_id` normally identifies its launch update, so a result can
+first contribute to an evidence summary at a later tick. Hypothesis versions
+share an ID; retain archive order when interpreting feedback.
+
+Use `trex-analyze trace` to perform these joins, and inspect a complete synthetic
+archive by running the [CPU example](../examples/analysis_demo/README.md).
+
+## Monitor and validate
 
 ```bash
-trex-panel \
-  --archive-root /path/to/archive \
-  --target-id 05_CD45 \
-  --panel-size 8 \
-  --foldseek-binary "$TREX_FOLDSEEK_BIN" \
-  --mmseqs-binary "$TREX_MMSEQS_BIN" \
-  --su-tm-score 0.60 \
-  --collapse-tm-score 0.80 \
-  --sequence-identity 0.90 \
-  --sequence-coverage 0.80
+trex status "$TREX_RUN_ARCHIVE"
+trex-analyze validate --archive-root "$TREX_RUN_ARCHIVE"
+trex-analyze summary --archive-root "$TREX_RUN_ARCHIVE"
+trex-analyze trace --archive-root "$TREX_RUN_ARCHIVE" --limit 10
 ```
 
-The 0.80 whole-archive collapse setting preserves the original post-hoc helper;
-it is separate from the live controller's default and from strict-SU counting.
-Changing it is an explicit analysis choice, not a behavior-neutral refactor.
+Add `--json` to the analysis commands for machine-readable output. Validation
+checks archive consistency; it does not establish a completed molecular run.
+The trace joins recent evidence, proposals, selection and worker execution.
+A queued or approved job is not necessarily a started job.
 
-The command reruns strict-only Foldseek and MMseqs2 in memory because historical
-`ResultRecord` rows are immutable. It refuses to select a strict panel when
-trusted structural deduplication is incomplete. Add `--append` only when the
-final selection should become another immutable archive record.
+## Export ranked structures and measurements
 
-Stdout uses schema `trex.final-panel.v1` and records every clustering threshold.
-With `--append`, an existing `panel_id` is rejected instead of adding an
-ambiguous duplicate selection.
-
-## Export structures
+The public command infers the recorded target ID:
 
 ```bash
-trex-export \
-  --archive-root /path/to/archive \
-  --target-id 05_CD45 \
-  --n 100 \
-  --su-tm-score 0.60 \
-  --sequence-identity 0.90 \
-  --sequence-coverage 0.80 \
-  --out-dir /path/to/export
+trex export "$TREX_RUN_ARCHIVE" --n 100
 ```
 
-Export is a copy operation; it does not change archived metrics, clusters, or
-candidate identities.
+The export contains `manifest.csv`, `manifest.json` and copied structures in
+`pdbs/`. The CSV includes rank, result ID, qualification measurements, chain
+identities and structure paths. It contains up to 100 qualified designs with
+accessible structures; it may contain structural duplicates. It does not
+produce a FASTA file. Use a new output directory for another export, or inspect
+`trex export --help` for its explicit overwrite option. The standalone
+`trex-export` compatibility command accepts the same detailed export settings.
 
-`manifest.json` uses schema `trex.best-n-manifest.v1` and contains the archive,
-target, ranking rule, gates, clustering thresholds, diagnostics, and designs.
-`manifest.csv` is the flat spreadsheet view; copied structures are under `pdbs/`.
+Archive artifact paths can be absolute. Moving only the JSONL files does not
+move or repair those references. Export before removing the original worker
+outputs; share the complete export directory. In particular, copying only the
+archive does not copy Complexa's external `inference/` outputs. Follow the
+`artifacts` paths in each result when preserving a complete raw campaign.
 
-Command stdout uses `trex.best-n-export.v1` and reports the resolved manifest
-paths. The CSV is always created with a stable header, even for zero designs.
-To prevent stale PDBs or manifests from mixing across analyses, a nonempty
-output directory is rejected. `--overwrite` replaces only recognized T-ReX
-export files and still refuses a directory containing unrelated files. The new
-export is staged completely before publication, so an I/O failure preserves the
-previous complete export.
+## Select a diverse panel
 
-## Downstream analysis
-
-Validate an archive before analysis, and save the generated layout contract with
-the analysis outputs:
+With Foldseek and MMseqs2 configured:
 
 ```bash
-trex-analyze validate --archive-root /path/to/archive
-trex-analyze schema --json > archive_schema.json
+set -a
+source .env
+set +a
+trex-panel --archive-root "$TREX_RUN_ARCHIVE" --target-id 05_CD45 \
+  --panel-size 8 --foldseek-binary "$TREX_FOLDSEEK_BIN" \
+  --mmseqs-binary "$TREX_MMSEQS_BIN" --su-tm-score 0.60 \
+  --collapse-tm-score 0.80 --sequence-identity 0.90 --sequence-coverage 0.80 \
+  > "$TREX_RUN_ARCHIVE/panel.json"
 ```
 
-For ready-to-save JSON views, use the
-[analysis handoff below](#save-an-analysis-handoff).
-Keep `validation.json`, `summary.json`, the schema and source provenance with
-analysis outputs. A limited decision trace is a recent-history view.
+This recomputes clustering and returns panel-selection JSON; it does not copy
+structures. The helper's 0.80 whole-archive collapse setting is separate from
+its 0.60 strict-SU threshold and the controller's live 0.60 collapse setting.
+Neither a limited panel nor a best-N export is the full campaign SU count.
 
-JSONL streams load directly into dataframe tools. The following optional pandas
-example assumes a populated archive with the named streams; pandas is an
-optional notebook dependency, not a controller requirement. It flattens nested
-measurements and performs a checked join:
+## Interpret the results
 
-```python
-from pathlib import Path
+A qualified design passes all three required measurements; an SU is a
+structurally distinct qualified design under binder-chain Foldseek clustering.
+Missing measurements are not measured failures or zeros.
+`trex-analyze summary` reads the latest recorded evidence; it does not rerun
+qualification or clustering over every archived result. Its throughput uses
+measured worker-wall GPU-hours.
 
-import pandas as pd
+In summary JSON, `llm_usage.calls` counts parsed archive records, which can
+include skipped decisions and deterministic guard records. It is not an API
+invocation count. Token totals sum recorded values; missing tokens cannot
+establish zero usage.
 
-root = Path("/path/to/archive")
-results = pd.read_json(root / "result_records.jsonl", lines=True)
-metric_columns = pd.json_normalize(results.pop("metrics")).add_prefix("metric.")
-results = results.join(metric_columns)
+New structure-bearing results store verified binder/target output roles in
+`artifacts.output_chain_map` and `bins.output_chain_identity`. Unresolved
+identities cannot receive SU credit or enter a production panel/export.
+Do not infer the output binder chain from the input chain label.
 
-launches = pd.read_json(root / "launch_decisions.jsonl", lines=True)
-dispatches = pd.read_json(root / "dispatch_records.jsonl", lines=True)
-realized = (
-    dispatches.merge(
-        launches[["launch_id", "candidate_id", "status", "why"]],
-        on="launch_id",
-        how="left",
-        validate="many_to_one",
-    )
-)
-
-lineage = (
-    results[["result_id", "parent_ids"]]
-    .explode("parent_ids")
-    .dropna(subset=["parent_ids"])
-    .rename(columns={"parent_ids": "lineage_token"})
-)
-
-candidates = pd.read_json(root / "action_candidates.jsonl", lines=True)
-candidate_ids = set(candidates["candidate_id"])
-result_ids = set(results["result_id"])
-
-
-def reference_kind(token):
-    in_candidates = token in candidate_ids
-    in_results = token in result_ids
-    if in_candidates and in_results:
-        return "ambiguous"
-    if in_candidates:
-        return "candidate"
-    if in_results:
-        return "result"
-    return "external_or_unknown"
-
-
-lineage["reference_kind"] = lineage["lineage_token"].map(reference_kind)
-```
-
-Recommended relationships are:
-
-- `tick_id` for evidence, Supervisor, LLM-call, launch, dispatch, and result time;
-- `launch_id` for selected intent to actual dispatch realization;
-- classified, exploded `parent_ids` for candidate-to-result and result-to-result
-  lineage; and
-- `result_id` with exploded `PanelSelection.selected_ids` for panel membership.
-
-Use `candidate_id` for proposal/config joins only after validation reports no
-recurrence; `launch_id` is the preferred launch-to-dispatch key.
-
-## Safe handling
-
-- Never edit JSONL rows in place.
-- Resume into the same root only through the controller.
-- Put post-hoc analyses outside the archive or in a clearly named analysis
-  subdirectory.
-- Keep provenance files and repository patches with any released archive.
-- Report Foldseek threshold, structure scope, worker-GPU-hour denominator, and
-  missing-score coverage with every endpoint.
-
-## Save an analysis handoff
-
-Save machine-readable views outside the campaign archive:
-
-```bash
-(
-  set -e
-  ARCHIVE_ROOT=/absolute/path/to/archive
-  ANALYSIS_DIR=./analysis/example_run
-  mkdir -p "$ANALYSIS_DIR"
-  trex-analyze validate --archive-root "$ARCHIVE_ROOT" --json > "$ANALYSIS_DIR/validation.json"
-  trex-analyze summary --archive-root "$ARCHIVE_ROOT" --json > "$ANALYSIS_DIR/summary.json"
-  trex-analyze trace --archive-root "$ARCHIVE_ROOT" --limit 10 --json > "$ANALYSIS_DIR/recent_trace.json"
-  trex-analyze schema --json > "$ANALYSIS_DIR/archive_schema.json"
-)
-```
-
-Validation failure stops the block; read `validation.json` before continuing.
-`summary.json` describes recorded evidence at the latest available snapshot;
-it is not an automatic recomputation of the paper's final endpoint.
-`recent_trace.json` contains the requested recent decisions, not the entire
-history. Keep provenance and source records with downstream results.
-
-For tabular analysis, start from `result_records.jsonl`. Use `result_id` as
-the result key and the schema's documented relationships for joins.
-`parent_ids` can reference actions as well as results. Missing measurements
-remain missing rather than becoming zero. See the
-[downstream notebook example](#downstream-analysis).
+Keep the complete campaign directory and its referenced files when archiving a
+run. The provenance files record the actual software, input and model identities;
+a seed alone does not capture asynchronous execution or guarantee identical outputs.

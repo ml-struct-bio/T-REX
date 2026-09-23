@@ -134,8 +134,7 @@ def case_productive(model: str) -> tuple[str, EvidenceSummary]:
         examples=[_example("r_001", "complexa_beam", pLDDT=92.0, iPAE=0.18)],
         metric_availability={"complexa_beam": {"pLDDT": True, "iPAE": True, "binder_scRMSD": True}},
     )
-    # Gap A' / Gap A: surface proven recipes so we can test whether
-    # the Planner builds on them rather than re-inventing parameters.
+    # Provide successful recipes to test evidence-based proposal reuse.
     from dataclasses import replace as _replace
     e = _replace(e, recipes=[
         Recipe(
@@ -285,8 +284,6 @@ def case_stalled(model: str) -> tuple[str, EvidenceSummary]:
             "bindcraft": {"pLDDT": False, "iPAE": False, "binder_scRMSD": False},
         },
     )
-    # MCR removed plan §10.6 — surface the recent-fallback signal only
-    # (renamed from `mcr_trigger_high_fallback`).
     from dataclasses import replace as _replace
     e = _replace(
         e,

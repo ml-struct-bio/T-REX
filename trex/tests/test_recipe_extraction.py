@@ -108,11 +108,7 @@ def test_extract_recipes_separates_classes():
 
 
 def test_extract_recipes_top_k_limit():
-    """§22.8.10 (stratified): strict_success now uses 4+4+4 quality/count/
-    recency selection regardless of `top_strict`. With only 3 distinct
-    recipes and identical metrics, dedup keeps all 3 (not 2). The
-    `top_strict` kwarg is preserved for back-compat but no longer applies
-    to strict_success — it only constrained non-stratified output."""
+    """Successful recipes retain distinct quality, support, and recency examples."""
     cands = [
         _ac(f"c{i}", config={"beam_width": w})
         for i, w in enumerate([4, 8, 16])
@@ -133,10 +129,7 @@ def test_extract_recipes_top_k_limit():
 
     recipes = extract_recipes(results, spawning_action=spawning, top_strict=2)
     strict = [r for r in recipes if r.recipe_class == "strict_success"]
-    # All 3 distinct recipes appear: identical quality → all win quality
-    # tier; descendant_count ordering still represented; recency tied (same
-    # tick). The stratified policy doesn't discard a winner just because the
-    # caller passes a smaller top_strict (that param is now defaulted-only).
+    # The strict-example limit is applied separately from the near-miss limit.
     assert len(strict) == 3
     counts = sorted([r.descendant_count for r in strict], reverse=True)
     assert counts == [3, 2, 1]
@@ -153,11 +146,7 @@ def test_extract_recipes_fallback_when_no_spawning():
 
 
 def test_stratified_strict_success_preserves_early_high_quality_winner():
-    """§22.8.10: an old recipe with the BEST quality must NOT be pruned
-    by newer recipes with more replicas. Pre-fix the sort was
-    (descendant_count, recency) — early high-quality winner got bumped
-    once newer recipes accumulated more descendants.
-    """
+    """Keep an early high-quality recipe despite newer, more frequent results."""
     # Recipe A: early (tick 5), high quality (pLDDT=95, iPAE=0.15, scRMSD=0.5),
     #           only 1 descendant.
     # Recipes B-E: late (tick 80-83), mediocre quality (pLDDT=91, iPAE=0.22,
@@ -235,9 +224,7 @@ def test_stratified_dedup_when_same_recipe_top_in_multiple_buckets():
 
 
 def test_method_health_strict_yield_su_dedup():
-    """§22.8.11: per-family SU count = distinct foldseek bins among
-    strict-pass records of that family. Distinguishes 7-raw-strict (1
-    cluster) from genuinely diverse output."""
+    """Distinguish repeated qualified records from structural diversity."""
     from trex.evidence_reducer import method_health
     rs = []
     # Family A: 5 strict passes but all in ONE foldseek cluster
@@ -248,7 +235,6 @@ def test_method_health_strict_yield_su_dedup():
             metrics={"pLDDT": 95.0, "iPAE": 0.15, "binder_scRMSD": 0.5},
             metrics_calibrated={}, route_lineage=[], gpu_h=0.2,
             exit_status="ok", panel_ready=False,
-            # SU dedup reads foldseek_su (strict-only SSOT, 2026-05-31)
             bins={"foldseek": "foldseek:repA", "foldseek_su": "foldseek:repA"},  # same cluster
         ))
     # Family B: 3 strict passes in 3 distinct clusters
@@ -284,9 +270,7 @@ def _strict_rec(rid, family, su_bin, exit_status="ok"):
 
 
 def test_method_health_per_family_su_no_cross_family_double_count():
-    """MED-1 (2026-05-31): a foldseek_su cluster shared by TWO families is owned
-    by ONE → sum(per-family strict_yield_su) == run-level distinct clusters.
-    Without owner-attribution the shared cluster counted in BOTH families."""
+    """Assign a shared strict cluster one family owner."""
     from trex.evidence_reducer import method_health
     rs = [
         _strict_rec("a", "complexa_beam", "shared"),
@@ -299,9 +283,7 @@ def test_method_health_per_family_su_no_cross_family_double_count():
 
 
 def test_strict_yield_requires_exit_ok():
-    """ssot_sweep LOW (2026-05-31): strict_yield must share strict_yield_su's
-    exit_status=='ok' eligibility, else a failed-exit strict-metric record gives
-    strict_yield=1 but strict_yield_su=0 → phantom mode-collapse signal."""
+    """Strict and structure-unique counts share the successful-exit condition."""
     from trex.evidence_reducer import method_health
     mh = method_health([_strict_rec("x", "complexa_beam", "c", exit_status="timeout")])
     assert mh["complexa_beam"].strict_yield == 0
@@ -328,12 +310,7 @@ def test_method_health_strict_yield_su_requires_official_foldseek_bin():
 
 
 def test_chained_refilter_success_credits_upstream_generator():
-    """BindCraft/BoltzGen/MPNN strict SU is re-scored on structure_refilter
-    records, but the PRIMARY strict_yield_su ledger now credits the GENERATING
-    family (v7_3 SU-attribution fix via resolve_generating_family) — the
-    structure_refilter re-scorer gets 0 own SU. Previously the primary field
-    mis-credited the re-scorer and only the secondary chained_strict_yield_su
-    compensated; that mis-taught the planner's exploit/mode logic."""
+    """Credit evaluated designs to their generating family."""
     from trex.evidence_reducer import method_health
     parent = ResultRecord(
         result_id="bc_parent", parent_ids=["bc_cand"], target_id="t",
@@ -359,19 +336,13 @@ def test_chained_refilter_success_credits_upstream_generator():
         ),
     }
     mh = method_health([parent, child], spawning)
-    # v7_3 fix: the GENERATOR (bindcraft) gets the SU in the PRIMARY ledger; the
-    # re-scorer gets 0 own SU (resolved via parent_ids[1]=bc_parent here).
+    # The generating family owns the SU; the evaluator does not receive a second credit.
     assert mh["structure_refilter"].strict_yield_su == 0
     assert mh["structure_refilter"].su_per_gpu_h is None
     assert mh["bindcraft"].strict_yield_su == 1
-    # chained_strict_yield_su still credits bindcraft (now a redundant alias of
-    # the corrected primary strict_yield_su; kept for backward compatibility).
+    # Both yield fields retain generator attribution for chained evaluation outcomes.
     assert mh["bindcraft"].chained_strict_yield_su == 1
-    # F2 (2026-05-31): ROUTE-LEVEL cost — denominator = upstream bindcraft gpu_h
-    # (2.0) + the downstream structure_refilter scoring gpu_h (0.05) it spawned
-    # = 2.05, so the diagnostic-lane chained rate is directly comparable to a
-    # Complexa family whose own su_per_gpu_h already bundles internal AF2.
-    # (Was upstream-only 1/2.0 = 0.5, which over-credited the lane.)
+    # Include upstream generation and downstream evaluation in the route denominator.
     assert mh["bindcraft"].chained_su_per_gpu_h == 1.0 / 2.05
 
 

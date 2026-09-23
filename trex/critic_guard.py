@@ -1,24 +1,8 @@
-"""T-ReX deterministic Critic guard — drop-in replacement for the LLM Critic.
+"""Deterministic advisory checks for deadlines and repeated failed settings.
 
-The LLM Critic (critic.py, §22.3) is flag-only and advisory: it never
-overrides Selector decisions, it only writes `LLMCallRecord.critic_flags`.
-Production logs (8856117, 85 ticks) show it fired 0 flags / 0 abstain with
-~3 output tokens and 0.16s latency per call — i.e. a rubber-stamp.
-
-Its 4 flag categories split into objective and judgment kinds:
-  (b) Deadline violation     — purely objective (remaining_wall_h vs runtime)
-  (c) Ignored recent failure — objective (config matches a recent joint_fail)
-  (a) Target-prior contradicted — judgment (legit exploration looks identical)
-  (d) Cross-target default-bias  — needs multi-target history; inert in a
-                                   single-target run.
-
-This guard implements (b) and (c) deterministically. (a) is computed only
-for reporting (see `judgment_flags`), NOT emitted, because a naive objective
-(a) over-flags legitimate exploration — exactly the case the LLM prompt is
-told to leave alone. (d) is omitted (inert per-target).
-
-The guard is dict-tolerant so it runs against both live schema objects and
-JSONL-replayed dicts.
+Emitted flags do not override selection. Target-prior judgments are reported separately,
+and cross-target bias is not assessed within a single campaign. Accepts schema objects
+and replayed dictionaries.
 """
 
 from __future__ import annotations
@@ -28,9 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-# Per-family expected runtime (hours), mirrors FAMILY_TIMEOUT_S in
-# controller.py. Used by category (b). Kept here as the SSOT for
-# the guard so the smoke can run without importing the controller.
+# Expected family runtimes used by the deadline check.
 FAMILY_RUNTIME_H: dict[str, float] = {
     "bindcraft": 9000 / 3600,
     "complexa_beam": 1800 / 3600,
@@ -67,13 +49,9 @@ def _g(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
-# Pure compute-BUDGET / scaffolding knobs (how MUCH search, not WHAT strategy).
-# Two configs that differ only in their scientific lever (reward_*_weight,
-# refinement, sequence_hallucination, exploration_*) but share these constants are
-# NOT the same hypothesis — excluding them from the overlap test stops the critic
-# from false-flagging a genuinely-changed config as a "repeat" (observed live on
-# CD45 9630421: a reward_max_ipsae change flagged because it shared beam_width/
-# nsteps/nsamples with a joint_fail recipe).
+# Ignore shared workload settings when comparing scientific configuration changes.
+# A different reward, refinement, hallucination, or exploration setting remains
+# a distinct proposal even when beam width and sample counts match.
 SCAFFOLDING_CONFIG_KEYS: frozenset[str] = frozenset({
     "beam_width", "n_branch", "nsamples", "nsteps", "num_recycles", "n_recycle",
     "n_simulations", "mcts_k", "max_per_method",

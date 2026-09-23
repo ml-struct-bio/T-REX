@@ -1,9 +1,7 @@
-"""MMseqs2-based sequence clustering for T-ReX official strict-success evidence.
+"""MMseqs2 clustering of qualified binder sequences.
 
-This is intentionally secondary evidence. The SSOT success metric remains
-AF2-Multimer strict_success deduped by binder structure (`foldseek_su`);
-sequence clustering only tells the Planner whether the structurally successful
-set is also sequence-diverse enough for a wet-lab panel.
+Sequence diversity is secondary evidence; structural SU credit uses Foldseek binder
+clusters.
 """
 
 from __future__ import annotations
@@ -15,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .foldseek_clusterer import _pdb_for_result, _record_binder_chain
+from .output_identity import chain_sequences
 from .schemas import ResultRecord
 
 
@@ -81,9 +80,8 @@ def _binder_sequence_from_pdb(
 ) -> tuple[str | None, str | None]:
     """Extract a binder-chain sequence from a PDB.
 
-    Conventionally T-ReX complex outputs use target chain A and binder chain B.
-    If B is absent, use the only chain; if multiple chains are present, choose
-    the first non-A chain. This mirrors binder-only Foldseek scoping.
+    Read only the requested chain from the first model, matching structural
+    extraction and identity verification. An absent chain is unresolved.
     """
     if not preferred_chain or path.suffix.lower() != ".pdb":
         return None, None
@@ -92,6 +90,8 @@ def _binder_sequence_from_pdb(
     seen: dict[str, set[tuple[str, str]]] = {}
     try:
         for line in path.read_text(errors="replace").splitlines():
+            if line.startswith("ENDMDL"):
+                break
             if not line.startswith("ATOM  ") or len(line) <= 26:
                 continue
             chain = line[21].strip()
@@ -112,11 +112,8 @@ def _binder_sequence_from_pdb(
         return None, None
     if preferred_chain in seqs:
         chain = preferred_chain
-    elif len(seqs) == 1:
-        chain = next(iter(seqs))
     else:
-        non_a = sorted(ch for ch in seqs if ch != "A")
-        chain = non_a[0] if non_a else sorted(seqs)[0]
+        return None, None
     return seqs[chain], chain
 
 
@@ -128,6 +125,12 @@ def _sequence_for_result(
     chain = _record_binder_chain(r, binder_chain_id)
     if not chain:
         return None, None
+    if "output_chain_map" in (r.artifacts or {}):
+        path = _pdb_for_result(r)
+        if path is None:
+            return None, None
+        residues = chain_sequences(path).get(chain, ())
+        return ("".join(_AA3_TO_1.get(residue, "X") for residue in residues), chain) if residues else (None, None)
     seq = _artifact_sequence(r)
     if seq:
         return seq, "artifact"

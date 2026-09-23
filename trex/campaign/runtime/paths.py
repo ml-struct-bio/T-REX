@@ -213,7 +213,7 @@ class RuntimePaths:
         )
         boltzgen_binary = configured_path(
             "boltzgen_binary",
-            external_root / ".venvs" / "boltzgen" / "bin" / "boltzgen",
+            boltzgen_repo / ".venv" / "bin" / "boltzgen",
         )
         boltzgen_cache = configured_path(
             "boltzgen_cache",

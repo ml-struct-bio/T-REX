@@ -41,8 +41,9 @@ def test_c_flags_pure_loser_reproposal():
 
 
 def test_c_does_not_flag_when_only_scaffolding_shared():
-    """2026-06-13: the levered reward knob CHANGED (on a non-shared key); only
-    compute-budget scaffolding is shared -> NOT a repeat (CD45 9630421 false +)."""
+    """A changed remediation setting is not a repeat merely because workload settings
+    match.
+    """
     joint = {"beam_width": 8, "n_branch": 4, "nsamples": 4, "nsteps": 200,
              "reward_avg_ipsae_weight": 1.0}
     proposed = {"beam_width": 8, "n_branch": 4, "nsamples": 4, "nsteps": 200,

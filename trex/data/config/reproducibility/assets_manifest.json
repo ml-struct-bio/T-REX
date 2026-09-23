@@ -1,0 +1,975 @@
+{
+  "schema_version": "trex.assets.v1",
+  "release": "0.1.3-publication",
+  "scope": "General-purpose checkpoints and nine study target structures covering all seven primary benchmark targets and two SI pilot targets.",
+  "components": {
+    "complexa": {
+      "description": "Protein-target Complexa and autoencoder; no ligand/AME weights.",
+      "license": "NVIDIA Open Model License",
+      "files": [
+        {
+          "path": "checkpoints/complexa/complexa.ckpt",
+          "size": 2934289381,
+          "sha256": "589db1741f29838c7961386f6b873087238c72682e56189b89e0ae02610c19e9",
+          "url": "https://huggingface.co/nvidia/NV-Proteina-Complexa-Protein-Target-160M-v1/resolve/ffed199e32612b98ffa04f4640d34d37b137fca5/complexa.ckpt"
+        },
+        {
+          "path": "checkpoints/complexa/complexa_ae.ckpt",
+          "size": 4100101779,
+          "sha256": "35f8865efd269995eeaf1670e1c1085acfe2988c40abdeda8e09a0e15eb40816",
+          "url": "https://huggingface.co/nvidia/NV-Proteina-Complexa-Protein-Target-160M-v1/resolve/ffed199e32612b98ffa04f4640d34d37b137fca5/complexa_ae.ckpt"
+        },
+        {
+          "path": "checkpoints/complexa/LICENSE",
+          "size": 9730,
+          "sha256": "1dc7d3bf639a7527a0063fb035d824e0cb6e49b83694b2c877b125f1dbdb0dbb",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/licenses/license_weights.txt"
+        },
+        {
+          "path": "checkpoints/complexa/Notice",
+          "size": 136,
+          "sha256": "18a144f7d7f83462a72eaa2bd2bc8eacee182bb9d5ce6bc58a46b2cdf96a0946",
+          "text": "Licensed by NVIDIA Corporation under the NVIDIA Open Model License\nUnmodified checkpoints from NVIDIA; repackaged by the T-REX authors.\n"
+        }
+      ]
+    },
+    "af2": {
+      "description": "AF2 parameter tree shared by evaluation, Complexa and BindCraft.",
+      "license": "CC-BY-4.0",
+      "files": [
+        {
+          "path": "checkpoints/af2/LICENSE",
+          "size": 18657,
+          "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+          "archive_member": "LICENSE"
+        },
+        {
+          "path": "checkpoints/af2/params_model_1.npz",
+          "size": 373069562,
+          "sha256": "f95e453e6a290ddf317ba1c9698d53fa110cf007ea979b0eae43e6ad38b4e364",
+          "archive_member": "params_model_1.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_1_multimer_v3.npz",
+          "size": 373043148,
+          "sha256": "611da8fc7478928f68de12e8b226260ef1f4ce62bcc29b008572e52f4f212959",
+          "archive_member": "params_model_1_multimer_v3.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_1_ptm.npz",
+          "size": 373103340,
+          "sha256": "5e564f79af5bcd54ccef6e2a6bb0ff01015d01650ebc41d4575e35f0de9ecc84",
+          "archive_member": "params_model_1_ptm.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_2.npz",
+          "size": 373069562,
+          "sha256": "4da37ed3b71f08d935f913dfab0133977cd0d76ad37cd9333ff294d7fae43f87",
+          "archive_member": "params_model_2.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_2_multimer_v3.npz",
+          "size": 373043148,
+          "sha256": "51362b0844382ae0f5720c59b81dd13a43eea40fbf9995dd2573bdab88865378",
+          "archive_member": "params_model_2_multimer_v3.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_2_ptm.npz",
+          "size": 373103340,
+          "sha256": "23645d9a82c4af2ed54cd48a7b3c1c2575dc6aa9fe931adb4d7203ca5f0dc398",
+          "archive_member": "params_model_2_ptm.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_3.npz",
+          "size": 371712506,
+          "sha256": "3cc4584dc0b0d1bdd1f7af14bd0692d00df3aa0e738d0d1b314821ad7eee4ffe",
+          "archive_member": "params_model_3.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_3_multimer_v3.npz",
+          "size": 373043148,
+          "sha256": "46d9bcad288edc7ad5a6362ee8e5f84307a69712e00e6c36b1ef9daf96ebc9ce",
+          "archive_member": "params_model_3_multimer_v3.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_3_ptm.npz",
+          "size": 371746284,
+          "sha256": "b53a724294cdd46a45d530b306bced8e429ffee74a4f9a2a897551b30966c415",
+          "archive_member": "params_model_3_ptm.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_4.npz",
+          "size": 371712506,
+          "sha256": "b0a78b7e18661abc6097a905f48505004e6e3993c5dc41fb6820acf56e9c1d12",
+          "archive_member": "params_model_4.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_4_multimer_v3.npz",
+          "size": 373043148,
+          "sha256": "59bdabd2d69c07fe26b37882d544acbd1b9f89f196828f4220da49e0610b572c",
+          "archive_member": "params_model_4_multimer_v3.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_4_ptm.npz",
+          "size": 371746284,
+          "sha256": "07d0e285ad1406ce3d91a2f6633a8ce9ee99155a53d24ee7783f8fd1e89f5d3a",
+          "archive_member": "params_model_4_ptm.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_5.npz",
+          "size": 371712506,
+          "sha256": "5d261ec6e18ba87784541f5ce113570018b3338df61ae577661b6232358d47e7",
+          "archive_member": "params_model_5.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_5_multimer_v3.npz",
+          "size": 373043148,
+          "sha256": "917742be5a105d6b80f13f1f13f20459f27ec3fdcd34ea088b359f4502d6177f",
+          "archive_member": "params_model_5_multimer_v3.npz"
+        },
+        {
+          "path": "checkpoints/af2/params_model_5_ptm.npz",
+          "size": 371746284,
+          "sha256": "2f8d0bd193e7d6e837958ba92acdc3f02b23b61bf841fa043fc076ee0e1996a5",
+          "archive_member": "params_model_5_ptm.npz"
+        },
+        {
+          "path": "checkpoints/af2/ATTRIBUTION.txt",
+          "size": 231,
+          "sha256": "f5a66eaf24005cbe4be46f69019096ee70ec7bea22cf74c494a71ed15a00a683",
+          "text": "AlphaFold parameters by DeepMind, unmodified. CC BY 4.0.\nSource: https://github.com/google-deepmind/alphafold\nJumper et al. (2021), https://doi.org/10.1038/s41586-021-03819-2\nEvans et al., https://doi.org/10.1101/2021.10.04.463034\n"
+        }
+      ],
+      "archive_url": "https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar"
+    },
+    "proteinmpnn": {
+      "description": "Four vanilla ProteinMPNN weight files in the recorded asset manifest.",
+      "license": "MIT",
+      "files": [
+        {
+          "path": "checkpoints/proteinmpnn/v_48_002.pt",
+          "size": 6681301,
+          "sha256": "925f2ca1007bf9b02e0e7f420ff00eb91f50fcc2722f64b42e644ae95adaa131",
+          "url": "https://raw.githubusercontent.com/dauparas/ProteinMPNN/8907e6671bfbfc92303b5f79c4b5e6ce47cdef57/vanilla_model_weights/v_48_002.pt"
+        },
+        {
+          "path": "checkpoints/proteinmpnn/v_48_010.pt",
+          "size": 6681301,
+          "sha256": "db866fae956a28661f926053d630610c55e9fc4bc03922f2aeeb98a37435ccce",
+          "url": "https://raw.githubusercontent.com/dauparas/ProteinMPNN/8907e6671bfbfc92303b5f79c4b5e6ce47cdef57/vanilla_model_weights/v_48_010.pt"
+        },
+        {
+          "path": "checkpoints/proteinmpnn/v_48_020.pt",
+          "size": 6681301,
+          "sha256": "c9cb4a671d79604111231f8dbfc7c590e06f1197453b7a6854ac6661a642f5bd",
+          "url": "https://raw.githubusercontent.com/dauparas/ProteinMPNN/8907e6671bfbfc92303b5f79c4b5e6ce47cdef57/vanilla_model_weights/v_48_020.pt"
+        },
+        {
+          "path": "checkpoints/proteinmpnn/v_48_030.pt",
+          "size": 6681301,
+          "sha256": "c34b7bfb38418ea30989fda3314f4781ac4e3920f9825731cf555f1fed44ac66",
+          "url": "https://raw.githubusercontent.com/dauparas/ProteinMPNN/8907e6671bfbfc92303b5f79c4b5e6ce47cdef57/vanilla_model_weights/v_48_030.pt"
+        },
+        {
+          "path": "checkpoints/proteinmpnn/LICENSE",
+          "size": 1072,
+          "sha256": "82009d25ce585631f452b2b24589bdb29c559ccfefa2f200ef312ed5b501a586",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/community_models/ProteinMPNN/LICENSE"
+        }
+      ]
+    },
+    "boltzgen": {
+      "description": "Five cached model weights and molecule dictionary, with pinned HF cache refs. Affinity weights are optional for protein-only use.",
+      "license": "MIT",
+      "files": [
+        {
+          "path": "checkpoints/boltzgen/models--boltzgen--boltzgen-1/snapshots/c1be29e1f82ffcc72264f64b993c43fb4e0d17f0/boltzgen1_diverse.ckpt",
+          "size": 1930847192,
+          "sha256": "360af8bd6e59527ff6ec25dd81253967f3bd3567d200053b10680634751f8e3c",
+          "url": "https://huggingface.co/boltzgen/boltzgen-1/resolve/c1be29e1f82ffcc72264f64b993c43fb4e0d17f0/boltzgen1_diverse.ckpt"
+        },
+        {
+          "path": "checkpoints/boltzgen/models--boltzgen--boltzgen-1/snapshots/c1be29e1f82ffcc72264f64b993c43fb4e0d17f0/boltzgen1_adherence.ckpt",
+          "size": 1930858014,
+          "sha256": "ac7078b3dc13064c68e0c3fd542e5bc538c33558bf6607f65e499eb336ca5e5d",
+          "url": "https://huggingface.co/boltzgen/boltzgen-1/resolve/c1be29e1f82ffcc72264f64b993c43fb4e0d17f0/boltzgen1_adherence.ckpt"
+        },
+        {
+          "path": "checkpoints/boltzgen/models--boltzgen--boltzgen-1/snapshots/c1be29e1f82ffcc72264f64b993c43fb4e0d17f0/boltzgen1_ifold.ckpt",
+          "size": 12582656,
+          "sha256": "dd4cf108c94471bdc3a326b7b180fa3854dc019110fae780208c30b50bd56578",
+          "url": "https://huggingface.co/boltzgen/boltzgen-1/resolve/c1be29e1f82ffcc72264f64b993c43fb4e0d17f0/boltzgen1_ifold.ckpt"
+        },
+        {
+          "path": "checkpoints/boltzgen/models--boltzgen--boltzgen-1/snapshots/c1be29e1f82ffcc72264f64b993c43fb4e0d17f0/boltz2_conf_final.ckpt",
+          "size": 2087255089,
+          "sha256": "525a51ef306da7282a54d23a4a5b91212fc60d0ff6b23b56dd6351de3b387530",
+          "url": "https://huggingface.co/boltzgen/boltzgen-1/resolve/c1be29e1f82ffcc72264f64b993c43fb4e0d17f0/boltz2_conf_final.ckpt"
+        },
+        {
+          "path": "checkpoints/boltzgen/models--boltzgen--boltzgen-1/snapshots/c1be29e1f82ffcc72264f64b993c43fb4e0d17f0/boltz2_aff.ckpt",
+          "size": 2061914091,
+          "sha256": "6dc13d488015666d3c3fdffd29fab54d72e4f2597b654f996cdcf5937feab090",
+          "url": "https://huggingface.co/boltzgen/boltzgen-1/resolve/c1be29e1f82ffcc72264f64b993c43fb4e0d17f0/boltz2_aff.ckpt"
+        },
+        {
+          "path": "checkpoints/boltzgen/models--boltzgen--boltzgen-1/refs/main",
+          "size": 40,
+          "sha256": "11b7350b7d98dac51cb3ce1711538007cc76d672fc636bf43802b3733dbed34f",
+          "text": "c1be29e1f82ffcc72264f64b993c43fb4e0d17f0"
+        },
+        {
+          "path": "checkpoints/boltzgen/datasets--boltzgen--inference-data/snapshots/c3d36fd276e9caf098c75d4113c6d5eb320b1a4c/mols.zip",
+          "size": 391401102,
+          "sha256": "3d4f56ac4262e745bb3d09cfaa19099b1d01be208122d501667b952e45521e53",
+          "url": "https://huggingface.co/datasets/boltzgen/inference-data/resolve/c3d36fd276e9caf098c75d4113c6d5eb320b1a4c/mols.zip"
+        },
+        {
+          "path": "checkpoints/boltzgen/datasets--boltzgen--inference-data/refs/main",
+          "size": 40,
+          "sha256": "a9c6054f6b27e06f39314c81adac533ad11edfe18a026be75cd349224c631e4c",
+          "text": "c3d36fd276e9caf098c75d4113c6d5eb320b1a4c"
+        },
+        {
+          "path": "checkpoints/boltzgen/LICENSE",
+          "size": 1070,
+          "sha256": "1d3aafee1429a716ca9afbe1760adf3a461cf61e750e92756dee510bdc0b7911",
+          "url": "https://raw.githubusercontent.com/HannesStark/boltzgen/31d9d9b9c72245b4ed6fe8742d6fbf4e1a3552a0/LICENSE"
+        }
+      ]
+    },
+    "qwen": {
+      "description": "Exact Qwen3.6-27B-FP8 controller model snapshot.",
+      "license": "Apache-2.0",
+      "files": [
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/.gitattributes",
+          "size": 1570,
+          "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/.gitattributes"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/LICENSE",
+          "size": 11343,
+          "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/LICENSE"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/README.md",
+          "size": 62858,
+          "sha256": "642e64db1e72483f132899f86801dedad9f38ee024acc515b7288a5ee74a2f01",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/README.md"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/chat_template.jinja",
+          "size": 7764,
+          "sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/chat_template.jinja"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/config.json",
+          "size": 51346,
+          "sha256": "885e6830f8d6883fefd63e3608c267452da2e6ce353a3494f42a7aa3d70c8434",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/config.json"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/configuration.json",
+          "size": 51,
+          "sha256": "2d4464e2ead06bc9bc718c781309ad1e7baded626d66e8dcdc8b469ba185faf0",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/configuration.json"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/generation_config.json",
+          "size": 202,
+          "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/generation_config.json"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-0.safetensors",
+          "size": 383865448,
+          "sha256": "5a6c052e37a754549e8f81c6fb32b050419f0fc2f71598817e08d0446b3f309d",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-0.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-1.safetensors",
+          "size": 383865448,
+          "sha256": "9a2efd1048386e560c8241c7b972e213b516f0cbeafc4de6f486bd7faddb8c39",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-1.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-10.safetensors",
+          "size": 383865472,
+          "sha256": "ebc4fd84671c2ac2d8d7b8da3707ed5d30738771a22eecc883d707521ed513a0",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-10.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-11.safetensors",
+          "size": 372313760,
+          "sha256": "9daf0f0b763489c0869061669293f93213d6060b1b0c88061b53bb97f9082cd6",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-11.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-12.safetensors",
+          "size": 383865472,
+          "sha256": "922729fcaedaece39e7b0fba137e3b900fbc3fe6bd8a85b16a215658be86938f",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-12.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-13.safetensors",
+          "size": 383865472,
+          "sha256": "61c0a820b09d58e45e516c56532007155b0fd214c11fa8906640c9217da95c84",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-13.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-14.safetensors",
+          "size": 383865472,
+          "sha256": "c2faab3a2ecddde0e762b3870c75f6fd83886edbabbd99ac40d641122d29e652",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-14.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-15.safetensors",
+          "size": 372313760,
+          "sha256": "e75fbe4de60c0420912b91f379c29c95a49644feee6fe8a0bd3dd638ae07ea2b",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-15.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-16.safetensors",
+          "size": 383865472,
+          "sha256": "84776e1d0a62c40730a4bc0f0e2c68242ba9a6150975d8992747fb6ecc0ebfcc",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-16.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-17.safetensors",
+          "size": 383865472,
+          "sha256": "c7e32717b97f9553d62734f01bed4cc970dcf6bd3d5ba67c7704290656523d7e",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-17.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-18.safetensors",
+          "size": 383865472,
+          "sha256": "1c6aed5f416dee34bb7ccfc322e0aa33f192b40afeab4b69fce784b2b349e253",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-18.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-19.safetensors",
+          "size": 372313760,
+          "sha256": "63e1b8af41de9851ed279f9d4f42566febf81d13ae47e469ea1009a26c6b64e0",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-19.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-2.safetensors",
+          "size": 383865448,
+          "sha256": "c2709097f77e8ec7204f908f54d7b84343139163e600815789124cbf15a709c6",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-2.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-20.safetensors",
+          "size": 383865472,
+          "sha256": "c5945b2e40f3d97cb01d0cedcb60ea36f61ab585179ab0c02fdeec3d360f724d",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-20.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-21.safetensors",
+          "size": 383865472,
+          "sha256": "c8a7696ad5cd1be016cfc553351ee4b588f3d972084dd47028db8dba9b113870",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-21.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-22.safetensors",
+          "size": 383865472,
+          "sha256": "08481a6a46057d0bcdcd2598d4f67d5f821725fc483800cd360c2d7047907e08",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-22.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-23.safetensors",
+          "size": 372313760,
+          "sha256": "13b2ba6536c77330fa1c40e91c4c707d5086803299e0f57dd03142bb28faaaa4",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-23.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-24.safetensors",
+          "size": 383865472,
+          "sha256": "0f7855ee6b018e707d015f445f7e8b9542003104dbd0436e83e8c0dec73bdd17",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-24.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-25.safetensors",
+          "size": 383865472,
+          "sha256": "fe49c034e095263e51b391895ccb5098741e06d75a6788769beb72fd50708846",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-25.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-26.safetensors",
+          "size": 383865472,
+          "sha256": "14f086ff505e9df89c2fb938c947b0d023f6f19d3cecdc7f03a70caf36ea6ed4",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-26.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-27.safetensors",
+          "size": 372313760,
+          "sha256": "4fa89a43e7196b18e6c67478aeedc1b3ab4853fa3bc4305d4ac73341b70e7e24",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-27.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-28.safetensors",
+          "size": 383865472,
+          "sha256": "f10aecd4f9800052bbf1ad2cca939eb44dc205d42ff546096ce9212bd6eae411",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-28.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-29.safetensors",
+          "size": 383865472,
+          "sha256": "633058fe6f1ec434c79e5c50d04c83b1955d52ca1889b1adca0e2db1cad9fa16",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-29.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-3.safetensors",
+          "size": 372313744,
+          "sha256": "a874cf17d3480894aa13eb34568e1025f10c4d6b96f483cd93be583849312a0f",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-3.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-30.safetensors",
+          "size": 383865472,
+          "sha256": "f9af47cefbdb300129c25eee1127c50629d9a2eba7f862a58a430a2cb378cf55",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-30.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-31.safetensors",
+          "size": 372313760,
+          "sha256": "2a2e87f569b5da06a87b83df628cb27f491f3dbed55ca82054820cb382cffd2e",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-31.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-32.safetensors",
+          "size": 383865472,
+          "sha256": "ca63c9dc522a1f0efd39e2cd7f5fb0efdb4274eabce5c15cc9aab11463cb3bb8",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-32.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-33.safetensors",
+          "size": 383865472,
+          "sha256": "bb8eb220efa6a599a4ee29914d59ca26fe13fe64ec6f9a5ccff300432abc572b",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-33.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-34.safetensors",
+          "size": 383865472,
+          "sha256": "6e08147ff5c8e0d5d7207d62ede78d6194f1453165cfab940743ff327bb0e6e5",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-34.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-35.safetensors",
+          "size": 372313760,
+          "sha256": "f4391ffd8245e648eeaad69954721f106ea0423a56f9abee921d3d2880d98c03",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-35.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-36.safetensors",
+          "size": 383865472,
+          "sha256": "5b077d63785d5c2b20ab5c0b8895b08941af08bb5685a1b6a5a3292c3eac638f",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-36.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-37.safetensors",
+          "size": 383865472,
+          "sha256": "d38c28d8c86cc147e5edc1935dec46687a6b3a8bc0d712e829003dd9cd4fab7d",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-37.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-38.safetensors",
+          "size": 383865472,
+          "sha256": "1628a41fa5d3dbcf2ffde423530a9e94e7228e247e922e2269bd348071a76365",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-38.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-39.safetensors",
+          "size": 372313760,
+          "sha256": "889c827bbff3fa6b78558dcdfd24670894b8a450395ec418e7a4f3202789e0b1",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-39.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-4.safetensors",
+          "size": 383865448,
+          "sha256": "9eb31d85023776894347a56101ee067f369d0d3c024f1331f5c7cba1f45b6df4",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-4.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-40.safetensors",
+          "size": 383865472,
+          "sha256": "5f90d2b2d16e5c51a078f21eed843d80c22af71401669577d274ea7f2c1ce95f",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-40.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-41.safetensors",
+          "size": 383865472,
+          "sha256": "80877a16835f7311a112ad0bbaf1d19997142ea3e1df95ffe446fd52ad1f80d8",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-41.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-42.safetensors",
+          "size": 383865472,
+          "sha256": "c1bf34d1a3e4d36b342c5c680bb12c4ce74f02530dff33b735fad27470ef2594",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-42.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-43.safetensors",
+          "size": 372313760,
+          "sha256": "10eceff499a24e0072a40b960671f00fc5012d7451f22cb6883f358e085ce276",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-43.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-44.safetensors",
+          "size": 383865472,
+          "sha256": "673543b94e59003265ae648bba11389c6735ee3264ec164108b6db99f1219587",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-44.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-45.safetensors",
+          "size": 383865472,
+          "sha256": "77b8c7a9cc451a378ee8d6927ce1c4b9664adb83c4786440eec099591dc98f32",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-45.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-46.safetensors",
+          "size": 383865472,
+          "sha256": "9ee06b8029b7812644bd5fb01b8bfea7b640353769d094ae59d8c82d986a8b7b",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-46.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-47.safetensors",
+          "size": 372313760,
+          "sha256": "6a8e0ddb389485965cd30bd0a90d1be5e1acb65cb6311ce337199f268c3120f6",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-47.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-48.safetensors",
+          "size": 383865472,
+          "sha256": "70bd74dcdf4ea8b09e1ae3463977a05aba73f2c02397491bb641a0a3ca6832a3",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-48.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-49.safetensors",
+          "size": 383865472,
+          "sha256": "a3481f971433ecc9041f44a555e443ff124e037601b36eab0bb3057946e041e4",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-49.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-5.safetensors",
+          "size": 383865448,
+          "sha256": "a8c9ea40638fd66bd8ab21940df215e7921b4af04646d758d74425be011a9b6f",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-5.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-50.safetensors",
+          "size": 383865472,
+          "sha256": "1aa60d9cb7f867a2033be0b1ff053049f09a6623826dd0d37daed3281479b875",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-50.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-51.safetensors",
+          "size": 372313760,
+          "sha256": "511f64772c1a5a15292eb1c48166b9d206088aed283185e10877fc43308097bd",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-51.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-52.safetensors",
+          "size": 383865472,
+          "sha256": "92c35a4e850b4c0b87a1eab42c47996504e062a8a11699ada20fcea0b88f36c7",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-52.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-53.safetensors",
+          "size": 383865472,
+          "sha256": "ab48cad204502ddbf17f5ee2d5e52457baac965300cc15e8a25f35c843b4d526",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-53.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-54.safetensors",
+          "size": 383865472,
+          "sha256": "2804cee95e18e9e516b9490c36ea7f41553a3fcb4455cf44a361d6086ed214a3",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-54.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-55.safetensors",
+          "size": 372313760,
+          "sha256": "543841981255fce51f0d84fe2db4de580594f6c6d6a590ae47ffbdbd01211571",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-55.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-56.safetensors",
+          "size": 383865472,
+          "sha256": "9847da2610e67b1f0ff39d8d103c7814f95bb8ede4204d5ae3055a8589bb0313",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-56.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-57.safetensors",
+          "size": 383865472,
+          "sha256": "32fe173c033e46648bc71bc8e5036565234c0c13ac66acb2ad84c9cbb426b90e",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-57.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-58.safetensors",
+          "size": 383865472,
+          "sha256": "c9858a0c4bd8cb980829a45d3f9ca52a0bd506c6a0775eb179d3e5ebfaae7867",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-58.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-59.safetensors",
+          "size": 372313760,
+          "sha256": "3c30fd14e883c15af50e2f647c2d0b8f3a2fca96904e4b37cc8bb1956a133606",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-59.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-6.safetensors",
+          "size": 383865448,
+          "sha256": "ad8b704be0cde8a774c4a49af59336d2b48b574446c1eddff8ba35d20d05ae69",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-6.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-60.safetensors",
+          "size": 383865472,
+          "sha256": "1f24aa7a99e72f658089462b258613b11d06d6e11733ff5d5f864c663a190f92",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-60.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-61.safetensors",
+          "size": 383865472,
+          "sha256": "0b083f4afca3538f87545d4fc50817292fc80061a731a5f0235f5c406be87b45",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-61.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-62.safetensors",
+          "size": 383865472,
+          "sha256": "b1e4c80f95241cc7d269d7cf6a35291c8b455f2d4f1381e4eafbfccb35add125",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-62.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-63.safetensors",
+          "size": 372313760,
+          "sha256": "7e27ec71df803eb38ba93aead54daaf1110d3f7124416443a30a3c81abc1c805",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-63.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-7.safetensors",
+          "size": 372313744,
+          "sha256": "2acb7e8d035d730a1c81c36c3b20ca15020b89d2bcd4462259f2ecb2a8dcb828",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-7.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-8.safetensors",
+          "size": 383865448,
+          "sha256": "81ebe095241562b2e2ace8875e2771f0cdb68e76286a18506ea19a749b8de9b4",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-8.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/layers-9.safetensors",
+          "size": 383865448,
+          "sha256": "fdd926f3e8c335eb21a2b41cf635cb241f337a5d47310ef41ae3d43bf53410c3",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/layers-9.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/merges.txt",
+          "size": 3353259,
+          "sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/merges.txt"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/model.safetensors.index.json",
+          "size": 137335,
+          "sha256": "6d19a4e607604c1ac631f810a56e6084c892b4cb0251c530c6a24fc877f9fb4b",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/model.safetensors.index.json"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/mtp.safetensors",
+          "size": 477202224,
+          "sha256": "9557770331f1f648eb96039f2a1e7cdc5742fe15c0f5777c43063b2c12a60f4c",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/mtp.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/outside.safetensors",
+          "size": 6007102112,
+          "sha256": "27a91100d904f6acc1c86d08675691199e1fe2da5da613106fb01ae4809b3ac1",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/outside.safetensors"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/preprocessor_config.json",
+          "size": 390,
+          "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/preprocessor_config.json"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/tokenizer.json",
+          "size": 12807982,
+          "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/tokenizer.json"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/tokenizer_config.json",
+          "size": 16718,
+          "sha256": "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/tokenizer_config.json"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/video_preprocessor_config.json",
+          "size": 385,
+          "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/video_preprocessor_config.json"
+        },
+        {
+          "path": "checkpoints/Qwen3.6-27B-FP8/vocab.json",
+          "size": 6722759,
+          "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+          "url": "https://huggingface.co/Qwen/Qwen3.6-27B-FP8/resolve/ec4160bf26124fa57e6451d070ee0c459a36d5b7/vocab.json"
+        }
+      ]
+    },
+    "targets": {
+      "description": "Nine study target PDBs covering all seven primary benchmark targets and two SI pilot targets; original crops and chains preserved.",
+      "license": "CC-BY-4.0 (upstream processed dataset)",
+      "files": [
+        {
+          "path": "targets/bindcraft_targets/BetV1.pdb",
+          "size": 198611,
+          "sha256": "3fac136a50a658bd883bb6404a297d1cfbda98cb4fbe6a01bbd931822514987d",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/assets/target_data/bindcraft_targets/BetV1.pdb",
+          "target": "betv1"
+        },
+        {
+          "path": "targets/bindcraft_targets/CbAgo_cropped_PAZ.pdb",
+          "size": 62207,
+          "sha256": "c5f7c3d685a15296e9515ff7024b1916ff33702df68b1c6cd0b7f15a7b243285",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/assets/target_data/bindcraft_targets/CbAgo_cropped_PAZ.pdb",
+          "target": "cbago"
+        },
+        {
+          "path": "targets/bindcraft_targets/CD45.pdb",
+          "size": 115829,
+          "sha256": "ea9e068e7f44d29d51e05e639bb361015350e26b4efdf45a67f8fc62c624efaa",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/assets/target_data/bindcraft_targets/CD45.pdb",
+          "target": "cd45"
+        },
+        {
+          "path": "targets/bindcraft_targets/HER2_cropped.pdb",
+          "size": 148716,
+          "sha256": "b4099344abd3c8bea4e8ddbd9ebd5d6c824580904f06211cdbc6bdbf4a4b0e3c",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/assets/target_data/bindcraft_targets/HER2_cropped.pdb",
+          "target": "her2aav"
+        },
+        {
+          "path": "targets/alpha_proteo_targets/3di3_cropped.pdb",
+          "size": 124497,
+          "sha256": "09e5b9874ad45a79013a962dc9a2d2195097f625797cb6dcaabbdfb430078465",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/assets/target_data/alpha_proteo_targets/3di3_cropped.pdb",
+          "target": "il7ra"
+        },
+        {
+          "path": "targets/alpha_proteo_targets/5o45_repacked.pdb",
+          "size": 75311,
+          "sha256": "dcd82d0a0258524ad6b036c39a3743cd8e16fb455178531781f81f5735a6a397",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/assets/target_data/alpha_proteo_targets/5o45_repacked.pdb",
+          "target": "pdl1"
+        },
+        {
+          "path": "targets/alpha_proteo_targets/6m0j_cropped.pdb",
+          "size": 124982,
+          "sha256": "312a33397411a070ca7c8ca440461cb2c14b590d33725407b9c5fe579940e3e1",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/assets/target_data/alpha_proteo_targets/6m0j_cropped.pdb",
+          "target": "sc2rbd"
+        },
+        {
+          "path": "targets/alpha_proteo_targets/1tnf_repacked.pdb",
+          "size": 277379,
+          "sha256": "031887e6ef8e94d35bcad371fb3e7c156d99481766438080b3d3917188fcd4b0",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/assets/target_data/alpha_proteo_targets/1tnf_repacked.pdb",
+          "target": "tnfalpha"
+        },
+        {
+          "path": "targets/alpha_proteo_targets/1www_cropped.pdb",
+          "size": 63423,
+          "sha256": "09d486c7368f57009e4f750ff17dc5ce86e03ef42dc9e9d153841bfb9e71f9c7",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/assets/target_data/alpha_proteo_targets/1www_cropped.pdb",
+          "target": "trka"
+        },
+        {
+          "path": "targets/LICENSE",
+          "size": 18721,
+          "sha256": "4e4158158a661b1090b1399068d7c9cf644f0850c156ba6c920d68d019f6314c",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/licenses/license_datasets.txt"
+        },
+        {
+          "path": "targets/ATTRIBUTION.txt",
+          "size": 367,
+          "sha256": "842663b6b726a36ace47bd853385e0c4e30c0afd2af4b3a59bd21188f1d98668",
+          "text": "Processed target structures distributed by NVIDIA Proteina-Complexa under CC BY 4.0.\nSource: https://github.com/NVIDIA-BioNeMo/Proteina-Complexa/tree/5ae24b055d828918296f2aad63616b1f4cc0e491/assets/target_data\nT-REX preserves the source bytes, crop, chain identifiers and residue numbering.\nHER2_AAV is a historical target label; the bundled structure is human HER2.\n"
+        }
+      ]
+    },
+    "colabdesign_bindcraft": {
+      "repository": "https://github.com/sokrypton/ColabDesign",
+      "revision": "e31a56fe1d9b4de25c8697f3a28b75892941cc72",
+      "package_version": "1.1.3",
+      "license": "ColabDesign Beer-Ware; original ProteinMPNN weights MIT",
+      "role": "Assets shipped inside the BindCraft ColabDesign package; installed by the pinned package, separately verified against this inventory.",
+      "files": [
+        {
+          "path": "checkpoints/colabdesign_bindcraft/colabdesign/af/weights/template_dgram_head.npy",
+          "size": 99968,
+          "sha256": "b0577de2aabc1d26502262ff82b37417fcf0420f455570320b96ddcd62274b23",
+          "url": "https://raw.githubusercontent.com/sokrypton/ColabDesign/e31a56fe1d9b4de25c8697f3a28b75892941cc72/colabdesign/af/weights/template_dgram_head.npy"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/colabdesign/mpnn/weights/v_48_002.pkl",
+          "size": 6650698,
+          "sha256": "cf9c5980389312d26e8d25699e3d1372a9563b81770b4ca04c02027dcceb27a2",
+          "url": "https://raw.githubusercontent.com/sokrypton/ColabDesign/e31a56fe1d9b4de25c8697f3a28b75892941cc72/colabdesign/mpnn/weights/v_48_002.pkl"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/colabdesign/mpnn/weights/v_48_010.pkl",
+          "size": 6650698,
+          "sha256": "7020cb9bda0c5722c7ededcfd00f8546af1510c66a44fb7acaebcaa33c1479ea",
+          "url": "https://raw.githubusercontent.com/sokrypton/ColabDesign/e31a56fe1d9b4de25c8697f3a28b75892941cc72/colabdesign/mpnn/weights/v_48_010.pkl"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/colabdesign/mpnn/weights/v_48_020.pkl",
+          "size": 6650698,
+          "sha256": "993194d9cbe9334f6c2c81bddeb1404ea831711bca8e38b591b4116060484ac3",
+          "url": "https://raw.githubusercontent.com/sokrypton/ColabDesign/e31a56fe1d9b4de25c8697f3a28b75892941cc72/colabdesign/mpnn/weights/v_48_020.pkl"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/colabdesign/mpnn/weights/v_48_030.pkl",
+          "size": 6650698,
+          "sha256": "e6b7882f9ca25c24379c29aeb9b8e78e8bcffab5699a3521fd22c50713220697",
+          "url": "https://raw.githubusercontent.com/sokrypton/ColabDesign/e31a56fe1d9b4de25c8697f3a28b75892941cc72/colabdesign/mpnn/weights/v_48_030.pkl"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/colabdesign/mpnn/weights_soluble/v_48_002.pkl",
+          "size": 6650310,
+          "sha256": "71f50e774950063da724870cb9377020b54ed1630cb025a44dc3079fe1f5af82",
+          "url": "https://raw.githubusercontent.com/sokrypton/ColabDesign/e31a56fe1d9b4de25c8697f3a28b75892941cc72/colabdesign/mpnn/weights_soluble/v_48_002.pkl"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/colabdesign/mpnn/weights_soluble/v_48_010.pkl",
+          "size": 6650310,
+          "sha256": "b54d7ddbfac98eedd4ee37c93515c91691abb681b59fa2717c178d31cd7dd18a",
+          "url": "https://raw.githubusercontent.com/sokrypton/ColabDesign/e31a56fe1d9b4de25c8697f3a28b75892941cc72/colabdesign/mpnn/weights_soluble/v_48_010.pkl"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/colabdesign/mpnn/weights_soluble/v_48_020.pkl",
+          "size": 6650310,
+          "sha256": "f3f705752e625a173ac5ea4d2b2e46bd10ff13905a73bcc1ca2ecd3420b361e1",
+          "url": "https://raw.githubusercontent.com/sokrypton/ColabDesign/e31a56fe1d9b4de25c8697f3a28b75892941cc72/colabdesign/mpnn/weights_soluble/v_48_020.pkl"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/colabdesign/mpnn/weights_soluble/v_48_030.pkl",
+          "size": 6650310,
+          "sha256": "36ee859552bca57676f7e1b4f094c5dea4d37534e0e27351fa7582ac14d0ab78",
+          "url": "https://raw.githubusercontent.com/sokrypton/ColabDesign/e31a56fe1d9b4de25c8697f3a28b75892941cc72/colabdesign/mpnn/weights_soluble/v_48_030.pkl"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/LICENSE.txt",
+          "size": 442,
+          "sha256": "cac8bec87cfba139cccc3c5f112678d1dc62adcd5e65e83659aea1147f356414",
+          "url": "https://raw.githubusercontent.com/sokrypton/ColabDesign/e31a56fe1d9b4de25c8697f3a28b75892941cc72/LICENSE.txt"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/ProteinMPNN-LICENSE",
+          "size": 1072,
+          "sha256": "82009d25ce585631f452b2b24589bdb29c559ccfefa2f200ef312ed5b501a586",
+          "url": "https://raw.githubusercontent.com/NVIDIA-BioNeMo/Proteina-Complexa/5ae24b055d828918296f2aad63616b1f4cc0e491/community_models/ProteinMPNN/LICENSE"
+        },
+        {
+          "path": "checkpoints/colabdesign_bindcraft/ATTRIBUTION.txt",
+          "size": 617,
+          "sha256": "0d67ec95c70a666740acf8310077f38a9ebe4dfb9bd8fa12e77beb73143d78b2",
+          "text": "ColabDesign package assets from sokrypton/ColabDesign revision e31a56fe1d9b4de25c8697f3a28b75892941cc72.\nThe included .pkl files are ColabDesign conversions of ProteinMPNN weights.\nRetain LICENSE.txt (ColabDesign) and ProteinMPNN-LICENSE (original weights).\nThe original and soluble families are distinct from the PyTorch .pt assets.\nThe small template_dgram_head.npy file is also distributed with this package.\nThese files were compared byte-for-byte with both the installed BindCraft package and the pinned public source.\nAll package weights are retained; this does not imply every model is used by every campaign.\n"
+        }
+      ]
+    },
+    "documentation": {
+      "license": "T-REX documentation MIT; referenced third-party licenses are retained separately.",
+      "role": "Setup instructions, software identities and validation scope, citations, installation profiles and required patches.",
+      "files": [
+        {
+          "path": "README.md",
+          "size": 1872,
+          "sha256": "8276588755f9f3f13570e98ea16457eaa91c7e86d96f2d1f67fe2c5d6668fb7f",
+          "text": "---\nlicense: other\nlicense_name: multiple-upstream-licenses\nlicense_link: THIRD_PARTY_NOTICES.md\n---\n\n# T-REX assets\n\nApproximately 52 GB of unmodified checkpoints and nine study target structures used\nby the T-REX controller. Files are portable copies, not links to private storage.\nPython environments, backend software, executables and credentials are not included.\n\n- [SETUP.md](SETUP.md): verify the download and connect it to a T-REX checkout.\n- [VERSIONS.json](VERSIONS.json): checkpoint/source revisions and environment validation status.\n- [CITATIONS.md](CITATIONS.md): official repositories and research references.\n- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md): licenses and required attribution.\n\nThe collection includes Complexa, AF2, PyTorch ProteinMPNN, BindCraft's packaged\nColabDesign weights, BoltzGen, and the full Qwen3.6-27B-FP8 snapshot. The targets\nare BetV1, CbAgo, CD45, human HER2, SC2RBD, IL7RA, PD-L1, TNFalpha and TrkA.\nThey comprise all seven primary benchmark targets and the two SI pilot targets.\n\nFrom this asset folder, check file integrity with:\n\n```bash\nsha256sum --check SHA256SUMS\n```\n\nFrom the T-REX code checkout, use `scripts/manage_assets.py` for verified downloads,\nZIP import and path setup. The public Google Drive link and release ZIP hash are\nrecorded in the code repository. Pinned upstream URLs also work. Keep this metadata\nand all component licenses with the files.\n\nUse the dependency-compatible serving, Complexa, BindCraft and BoltzGen profiles\nin `setup/`, together with the matching T-REX checkout's installation guide.\nFile verification is separate from installation, inference and benchmark\nreproduction. See `SETUP.md` and `VERSIONS.json` for prerequisites and validation scope.\nPyRosetta and all backend environments must be installed separately under their\nupstream terms; they are not redistributed here.\n"
+        },
+        {
+          "path": "SETUP.md",
+          "size": 4609,
+          "sha256": "65a1e1dd49ddc718161f67a54c837b7de7bb527b4656a9f4468bde20446bdf11",
+          "text": "# Set up T-REX assets\n\nUse a matching T-REX source checkout and Python 3.10–3.12. The asset folder must\nremain accessible on compute nodes after setup. Allow at least 110 GB for the\nZIP and extracted files, plus software environments and campaign outputs.\n\n## 1. Install the controller and backend source\n\nUse sibling directories named `T-REX/` (code) and `T-REX-assets/` (this bundle),\nor replace `../T-REX-assets` in the commands with its absolute path. All commands\nbelow run from the **T-REX code checkout**, not from this asset directory.\n\nFollow the checkout's README to create the controller environment, then\n`docs/installation.md` to obtain the pinned backend revisions. Git and Git LFS\nmust work on both login and compute nodes. The serving environment also needs a\ncompatible NVIDIA driver, CUDA toolkit with `nvcc`, and a C++ compiler.\nKeep environments and their base Python interpreters on shared storage.\n\n## 2. Verify and connect assets\n\n```bash\npython scripts/manage_assets.py verify --root ../T-REX-assets\npython scripts/manage_assets.py configure \\\n  --root ../T-REX-assets \\\n  --complexa-repo ./external/Proteina-Complexa \\\n  --community-repo ./external/Proteina-Complexa \\\n  --bindcraft-repo ./external/BindCraft \\\n  --env-out .env.assets\n```\n\n`configure` verifies file hashes, creates checkpoint links and writes `.env.assets`.\nIt preserves existing identical files and refuses conflicts. The public Complexa\ncheckout supplies both generation and community-model source; no private checkout\nis needed. Software environments and backend-specific configuration are separate.\n\n## 3. Install and check separate environments\n\nFollow the matching checkout's `docs/installation.md` for the complete commands.\nThis bundle includes copies of the tested installation inputs:\n\n| Environment | Python | Files in `setup/` |\n| --- | --- | --- |\n| Qwen serving | 3.12.13 | `serving_requirements.lock.txt`, `serving_environment.json` |\n| Complexa, AF2 and ProteinMPNN | 3.12.13 | `complexa_requirements.lock.txt`, `complexa_environment.json`, `complexa-dependencies.patch` |\n| BindCraft | 3.10.20 | `bindcraft_requirements.lock.txt`, `bindcraft-production.patch` |\n| BoltzGen | 3.12.13 | `boltzgen_requirements.lock.txt` |\n\nThe lock files and patches match the code checkout; profile paths here are\nrelative to the asset root. Use `uv==0.11.1` and a separate new environment for\neach profile. The Complexa setup tool applies the dependency-metadata patch and installs its local\nColabDesign package; the lock alone does not perform those steps. BoltzGen also\nrequires the pinned backend checkout to be installed separately.\n\nBindCraft requires separately licensed PyRosetta, obtained under its upstream\nterms from the official wheel index specified in the installation guide. It is\nnot bundled here. The pinned checkout supplies DSSP and DAlphaBall; check their\nshared-library dependencies on compute nodes. Foldseek and MMseqs2 must also be\ninstalled separately. Configure Complexa's own `.env` and run `complexa init uv`\nas documented; T-REX's `.env` is a different file.\n\nThe BindCraft lock pins ColabDesign to the recorded Git revision. If using the\nupstream conda installer instead, pin ColabDesign as directed in the installation\nguide. Check both dependencies and installed weights:\n\n```bash\nuv pip check --python .venv-serving/bin/python\nuv pip check --python external/Proteina-Complexa/.venv/bin/python\nuv pip check --python external/BindCraft/.venv/bin/python\nuv pip check --python external/BoltzGen/.venv/bin/python\npython scripts/manage_assets.py verify-bindcraft \\\n  --python external/BindCraft/.venv/bin/python\n```\n\nThis package contains the ColabDesign `.pkl` weights and small AF2 template array\nalso retained under `checkpoints/colabdesign_bindcraft/`. They are separate from\nthe PyTorch `.pt` ProteinMPNN weights. Do not replace one format with the other.\nThe verifier reads package metadata and hashes files without loading model code.\n\nRun dependency and GPU checks on your installation. Dependency compatibility and\ncheckpoint loading do not establish a completed molecular campaign. Validation\nscope is recorded in `VERSIONS.json`; full BindCraft accepted-design-quota\ncompletion and complete benchmark reproduction remain outside that scope.\n\n## 4. Configure and run\n\nReturn to the code checkout's README to set target, available GPU count, campaign\nduration and output directory. Complete executable paths and backend configuration,\nthen run `bash scripts/submit.sh --check` before submitting. This asset ZIP by\nitself does not install software or reproduce scientific results.\n"
+        },
+        {
+          "path": "VERSIONS.json",
+          "size": 9454,
+          "sha256": "b27e8813c02a298b7fb13aaa8a7a2adb9589612db2cdc8f27a674446368da608",
+          "text": "{\n  \"schema_version\": \"trex.asset-versions.v1\",\n  \"installation_policy\": \"Use the compatible profiles and separate environments described in SETUP.md.\",\n  \"backend_sources\": {\n    \"proteina_complexa\": {\n      \"repository\": \"https://github.com/NVIDIA-BioNeMo/Proteina-Complexa\",\n      \"git_commit\": \"5ae24b055d828918296f2aad63616b1f4cc0e491\"\n    },\n    \"bindcraft\": {\n      \"repository\": \"https://github.com/martinpacesa/BindCraft\",\n      \"git_commit\": \"b971db42ba6e091afab63ccb30ae02215150a990\"\n    },\n    \"boltzgen\": {\n      \"repository\": \"https://github.com/HannesStark/boltzgen\",\n      \"git_commit\": \"31d9d9b9c72245b4ed6fe8742d6fbf4e1a3552a0\"\n    }\n  },\n  \"bindcraft_colabdesign\": {\n    \"repository\": \"https://github.com/sokrypton/ColabDesign\",\n    \"git_commit\": \"e31a56fe1d9b4de25c8697f3a28b75892941cc72\",\n    \"version\": \"1.1.3\"\n  },\n  \"assets\": {\n    \"complexa\": {\n      \"description\": \"Protein-target Complexa and autoencoder; no ligand/AME weights.\",\n      \"license\": \"NVIDIA Open Model License\"\n    },\n    \"af2\": {\n      \"description\": \"AF2 parameter tree shared by evaluation, Complexa and BindCraft.\",\n      \"license\": \"CC-BY-4.0\",\n      \"archive_url\": \"https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar\"\n    },\n    \"proteinmpnn\": {\n      \"description\": \"Four vanilla ProteinMPNN weight files in the recorded asset manifest.\",\n      \"license\": \"MIT\"\n    },\n    \"boltzgen\": {\n      \"description\": \"Five cached model weights and molecule dictionary, with pinned HF cache refs. Affinity weights are optional for protein-only use.\",\n      \"license\": \"MIT\"\n    },\n    \"qwen\": {\n      \"description\": \"Exact Qwen3.6-27B-FP8 controller model snapshot.\",\n      \"license\": \"Apache-2.0\"\n    },\n    \"targets\": {\n      \"description\": \"Nine study target PDBs covering all seven primary benchmark targets and two SI pilot targets; original crops and chains preserved.\",\n      \"license\": \"CC-BY-4.0 (upstream processed dataset)\"\n    },\n    \"colabdesign_bindcraft\": {\n      \"repository\": \"https://github.com/sokrypton/ColabDesign\",\n      \"revision\": \"e31a56fe1d9b4de25c8697f3a28b75892941cc72\",\n      \"package_version\": \"1.1.3\",\n      \"license\": \"ColabDesign Beer-Ware; original ProteinMPNN weights MIT\",\n      \"role\": \"Assets shipped inside the BindCraft ColabDesign package; installed by the pinned package, separately verified against this inventory.\"\n    }\n  },\n  \"default_serving_profile\": {\n    \"schema_version\": \"trex.serving-installation.v1\",\n    \"python\": \"3.12.13\",\n    \"platform\": \"linux\",\n    \"machine\": \"x86_64\",\n    \"lock\": \"setup/serving_requirements.lock.txt\",\n    \"lock_sha256\": \"7dcbdbb0bb1e153020f0500529159b430dafc8d166d6a3eb7deb7a02c81d21fe\",\n    \"historical_inventory\": \"Study inventory is recorded in the code release; use this profile for installation.\",\n    \"differences_from_historical_inventory\": {\n      \"numpy\": {\n        \"historical\": \"2.4.4\",\n        \"installation\": \"2.2.6\"\n      },\n      \"transformers\": {\n        \"historical\": \"5.6.0.dev0 @ a29df2d916e3b820aecd19d3b5a877abc523ba3c\",\n        \"installation\": \"4.57.6\"\n      },\n      \"huggingface-hub\": {\n        \"historical\": \"1.11.0\",\n        \"installation\": \"0.36.2\"\n      }\n    },\n    \"validation\": {\n      \"dependency_check\": \"passed; 179 distributions\",\n      \"config_and_tokenizer\": \"passed for the pinned Qwen snapshot\",\n      \"gpu_smoke\": \"H100, CUDA toolkit 12.8, vLLM 0.19.0, max_model_len 65536, thinking disabled; direct text generation and OpenAI-compatible HTTP request through the T-REX client passed.\",\n      \"scope\": \"Installation/LLM validation only; this profile has not reproduced full study campaigns.\"\n    }\n  },\n  \"observed_backend_environments\": {\n    \"complexa\": {\n      \"python\": \"3.12.13\",\n      \"installed_packages\": 256,\n      \"locked_dependencies\": 254,\n      \"profile\": \"setup/complexa_environment.json\",\n      \"packages\": {\n        \"numpy\": \"1.26.4\",\n        \"jax\": \"0.4.29\",\n        \"jaxlib\": \"0.4.29+cuda12.cudnn91\",\n        \"torch\": \"2.7.0+cu126\",\n        \"colabdesign\": \"1.1.1.1\",\n        \"biotite\": \"1.4.0\",\n        \"chex\": \"0.1.87\",\n        \"optax\": \"0.2.3\",\n        \"torchaudio\": \"2.7.0+cu126\"\n      },\n      \"dependency_check\": \"passed: zero conflicts\",\n      \"fresh_install_validated\": true,\n      \"inference_validation\": \"Representative generation, canonical AF2 evaluation and ProteinMPNN redesign.\",\n      \"lock\": \"setup/complexa_requirements.lock.txt\",\n      \"lock_sha256\": \"f332774971ec39fb3cafd9244fe6be06ceed889b0a18b2ea0b05f76d4ac36457\"\n    },\n    \"bindcraft\": {\n      \"python\": \"3.10.20\",\n      \"installed_packages\": 74,\n      \"packages\": {\n        \"numpy\": \"1.26.4\",\n        \"jax\": \"0.6.0\",\n        \"jaxlib\": \"0.6.0\",\n        \"colabdesign\": \"1.1.3\",\n        \"pyrosetta\": \"2026.3+releasequarterly.5e498f1409\",\n        \"flax\": \"0.9.0\",\n        \"optax\": \"0.2.8\"\n      },\n      \"dependency_check\": \"passed: zero conflicts\",\n      \"fresh_install_validated\": true,\n      \"whole_job_completed\": false,\n      \"inference_validation\": \"Generation, scoring and relaxation tested; native accepted-design-quota completion is not validated.\",\n      \"license_note\": \"PyRosetta is separately licensed and is not redistributed in this bundle.\",\n      \"source_patch\": \"setup/bindcraft-production.patch\",\n      \"source_patch_sha256\": \"dc69de94f8b21a14ebd26e13f41330676161df63b29340fa90d15100f7406268\",\n      \"lock\": \"setup/bindcraft_requirements.lock.txt\",\n      \"lock_sha256\": \"b5e3b4e24c82bab803d606a2dbcc066690cc2ff86d60471e6438fb2b83ebda5b\"\n    },\n    \"boltzgen\": {\n      \"python\": \"3.12.13\",\n      \"locked_dependencies\": 101,\n      \"backend_installation\": \"Install the pinned local BoltzGen checkout separately with --no-deps -e.\",\n      \"packages\": {\n        \"numpy\": \"2.0.2\",\n        \"torch\": \"2.14.0\",\n        \"huggingface-hub\": \"1.32.0\",\n        \"boltzgen\": \"0.3.2\"\n      },\n      \"dependency_check\": \"passed: zero conflicts\",\n      \"fresh_install_validated\": true,\n      \"whole_job_completed\": true,\n      \"inference_validation\": \"Representative native pipeline completed.\",\n      \"lock\": \"setup/boltzgen_requirements.lock.txt\",\n      \"lock_sha256\": \"5e2f3f6e4a824f1c2f9b11fceb78baaf0e153623f8005cd670a498c24373c9c6\"\n    }\n  },\n  \"backend_installation_status\": \"Separate compatible environments passed dependency checks. Representative inference was tested; BindCraft native accepted-design-quota completion is not validated.\",\n  \"tools\": {\n    \"foldseek\": \"8dc75c74ad0eddab73cfd905963d13bf74dc012b\",\n    \"mmseqs2\": \"76da68ad7577378410c075049e18666fcc94f8d1\"\n  },\n  \"default_complexa_profile\": {\n    \"schema_version\": \"trex.complexa-installation.v1\",\n    \"python\": \"3.12.13\",\n    \"platform\": \"linux\",\n    \"machine\": \"x86_64\",\n    \"uv\": \"0.11.1\",\n    \"repository\": \"https://github.com/NVIDIA-BioNeMo/Proteina-Complexa\",\n    \"git_commit\": \"5ae24b055d828918296f2aad63616b1f4cc0e491\",\n    \"source_trees\": {\n      \"src/proteinfoundation\": \"95023516f000d4b301505d2967bb3daa136c5598\",\n      \"community_models/colabdesign\": \"844c76c09355e094a29a34c16fead3f63dea3819\",\n      \"community_models/ProteinMPNN\": \"6825955f4c3dec0ada2dd0f1a969f61515bd24d2\"\n    },\n    \"lock\": \"setup/complexa_requirements.lock.txt\",\n    \"lock_sha256\": \"f332774971ec39fb3cafd9244fe6be06ceed889b0a18b2ea0b05f76d4ac36457\",\n    \"dependency_patch\": \"setup/complexa-dependencies.patch\",\n    \"dependency_patch_sha256\": \"45e5e885a4597c33423c8edac1372e56c353105907d9f6973722f0e16b76fe49\",\n    \"patched_pyproject_sha256\": \"3cb420d3f72a182eb1c016f1ee254be374b1a24389aa7aec35c110fcb6e6b1dd\",\n    \"metadata_corrections\": {\n      \"einops\": {\n        \"declared\": \"0.6\",\n        \"installation\": \"0.8.2\",\n        \"reason\": \"Satisfies rc-foundry and atomworks extra dependencies.\"\n      },\n      \"scipy\": {\n        \"declared\": \"1.12.0\",\n        \"installation\": \"1.17.1\",\n        \"reason\": \"Satisfies the SciPy requirements of atomworks and biotraj.\"\n      }\n    },\n    \"changed_installed_versions\": {\n      \"numpy\": {\n        \"previous\": \"2.4.3\",\n        \"installation\": \"1.26.4\"\n      },\n      \"biotite\": {\n        \"previous\": \"1.6.0\",\n        \"installation\": \"1.4.0\"\n      },\n      \"chex\": {\n        \"previous\": \"0.1.91\",\n        \"installation\": \"0.1.87\"\n      },\n      \"optax\": {\n        \"previous\": \"0.2.8\",\n        \"installation\": \"0.2.3\"\n      },\n      \"torchaudio\": {\n        \"previous\": \"2.11.0+cu126\",\n        \"installation\": \"2.7.0+cu126\"\n      }\n    },\n    \"scope\": \"A compatible Complexa/AtomWorks/AF2/ProteinMPNN environment. Source code and checkpoint bytes are unchanged. Full campaign output equality is not established.\",\n    \"validation\": {\n      \"fresh_installation\": \"passed\",\n      \"repeat_installation\": \"passed\",\n      \"dependency_check\": \"passed: 256 installed packages; 254 locked third-party dependencies\",\n      \"backend_imports_and_config\": \"passed\",\n      \"gpu_smoke\": \"passed: NVIDIA H100 80GB; PyTorch/JAX/Flax/Optax/Orbax\",\n      \"checkpoint_loading\": \"passed: AF2 parameters, Complexa generator and autoencoder\",\n      \"representative_inference\": \"passed: Complexa generation, canonical AF2 evaluation and ProteinMPNN redesign\",\n      \"full_design_campaign\": \"not tested\"\n    }\n  },\n  \"validation_scope\": {\n    \"platform\": \"Linux x86_64, NVIDIA H100 80GB\",\n    \"full_48_hour_benchmark\": \"not tested\",\n    \"all_action_families_and_configurations\": \"not tested\",\n    \"immutable_final_release_replay\": false,\n    \"scientific_performance\": \"not established by installation or integration checks\"\n  },\n  \"release\": \"0.1.3-publication\"\n}\n"
+        },
+        {
+          "path": "CITATIONS.md",
+          "size": 3527,
+          "sha256": "05f18c105efd04530bcbbdfcd6c31d6827d749a779e3189903e779958fc3ee98",
+          "text": "# Upstream software and citations\n\nCite T-REX using the code repository's `CITATION.cff`. Also credit the software,\nmodels and data used in your work. The repositories below are official sources;\nrelease-specific commits and model snapshots are recorded in `VERSIONS.json`\nand `manifest.json` in the asset collection. A citation does not replace a license.\n\n| Component | Official source | Research reference |\n| --- | --- | --- |\n| Proteina-Complexa | [NVIDIA-BioNeMo/Proteina-Complexa](https://github.com/NVIDIA-BioNeMo/Proteina-Complexa) | Didi et al., *Scaling Atomistic Protein Binder Design with Generative Pretraining and Test-Time Compute*, ICLR 2026. [Paper](https://openreview.net/forum?id=qmCpJtFZra) |\n| BindCraft | [martinpacesa/BindCraft](https://github.com/martinpacesa/BindCraft) | Pacesa et al., *One-shot design of functional protein binders with BindCraft*, Nature (2025). [DOI](https://doi.org/10.1038/s41586-025-09429-6) |\n| BoltzGen | [HannesStark/boltzgen](https://github.com/HannesStark/boltzgen) | Stark et al., *BoltzGen: Toward Universal Binder Design* (2025). [DOI](https://doi.org/10.1101/2025.11.20.689494) |\n| AlphaFold2 | [google-deepmind/alphafold](https://github.com/google-deepmind/alphafold) | Jumper et al., *Highly accurate protein structure prediction with AlphaFold*, Nature (2021). [DOI](https://doi.org/10.1038/s41586-021-03819-2) |\n| AlphaFold-Multimer | [google-deepmind/alphafold](https://github.com/google-deepmind/alphafold) | Evans et al., *Protein complex prediction with AlphaFold-Multimer* (2021). [DOI](https://doi.org/10.1101/2021.10.04.463034) |\n| ProteinMPNN | [dauparas/ProteinMPNN](https://github.com/dauparas/ProteinMPNN) | Dauparas et al., *Robust deep learning-based protein sequence design using ProteinMPNN*, Science (2022). [DOI](https://doi.org/10.1126/science.add2187) |\n| ColabDesign | [sokrypton/ColabDesign](https://github.com/sokrypton/ColabDesign) | Cite the software and the relevant AlphaFold/ProteinMPNN work above. |\n| Foldseek | [steineggerlab/foldseek](https://github.com/steineggerlab/foldseek) | van Kempen et al., *Fast and accurate protein structure search with Foldseek*, Nature Biotechnology (2023). [DOI](https://doi.org/10.1038/s41587-023-01773-0) |\n| MMseqs2 | [soedinglab/MMseqs2](https://github.com/soedinglab/MMseqs2) | Steinegger and Söding, *MMseqs2 enables sensitive protein sequence searching for the analysis of massive data sets*, Nature Biotechnology (2017). [DOI](https://doi.org/10.1038/nbt.3988); for clustering, *Clustering huge protein sequence sets in linear time*, Nature Communications (2018). [DOI](https://doi.org/10.1038/s41467-018-04964-5) |\n| Qwen3.6-27B-FP8 | [QwenLM official GitHub organization](https://github.com/QwenLM); [exact model snapshot](https://huggingface.co/Qwen/Qwen3.6-27B-FP8/tree/ec4160bf26124fa57e6451d070ee0c459a36d5b7) | Qwen Team, *Qwen3.6-27B: Flagship-Level Coding in a 27B Dense Model* (2026). [Model release](https://qwen.ai/blog?id=qwen3.6-27b) |\n| vLLM | [vllm-project/vllm](https://github.com/vllm-project/vllm) | Kwon et al., *Efficient Memory Management for Large Language Model Serving with PagedAttention*, SOSP (2023). [Paper](https://arxiv.org/abs/2309.06180) |\n\nThe processed target structures are redistributed from the pinned public\nComplexa data tree; individual source URLs and hashes are in the asset manifest,\nand attribution is retained in `targets/ATTRIBUTION.txt`. Cite original structure\ndepositions where applicable. Checkpoint license notices remain beside each model.\n"
+        },
+        {
+          "path": "THIRD_PARTY_NOTICES.md",
+          "size": 2221,
+          "sha256": "90f7105485f49039c76c2fe6091568b9650ee9d116709ad43b912e7537a61d5a",
+          "text": "# Third-party notices\n\nThis collection retains separate upstream licenses. No single T-REX license\nis applied to all assets. Files are copied without changing model parameters\nor structure coordinates; directory layout and attribution files are added.\n\n| Component | License and source |\n| --- | --- |\n| Complexa | [NVIDIA Open Model License](checkpoints/complexa/LICENSE); [required Notice](checkpoints/complexa/Notice); [official model card](https://huggingface.co/nvidia/NV-Proteina-Complexa-Protein-Target-160M-v1) |\n| AF2 parameters | [CC BY 4.0](checkpoints/af2/LICENSE); [attribution](checkpoints/af2/ATTRIBUTION.txt); [upstream terms](https://github.com/google-deepmind/alphafold#model-parameters) |\n| ProteinMPNN | [MIT](checkpoints/proteinmpnn/LICENSE); [upstream](https://github.com/dauparas/ProteinMPNN) |\n| BindCraft ColabDesign package weights | [ColabDesign Beer-Ware notice](checkpoints/colabdesign_bindcraft/LICENSE.txt); [original ProteinMPNN MIT license](checkpoints/colabdesign_bindcraft/ProteinMPNN-LICENSE); [attribution](checkpoints/colabdesign_bindcraft/ATTRIBUTION.txt); [official source](https://github.com/sokrypton/ColabDesign/tree/e31a56fe1d9b4de25c8697f3a28b75892941cc72) |\n| BoltzGen weights | [MIT](checkpoints/boltzgen/LICENSE); [official model card](https://huggingface.co/boltzgen/boltzgen-1) |\n| BoltzGen molecule dictionary | MIT as declared in the [pinned dataset card](https://huggingface.co/datasets/boltzgen/inference-data/blob/c3d36fd276e9caf098c75d4113c6d5eb320b1a4c/README.md) |\n| Qwen3.6-27B-FP8 | [Apache 2.0](checkpoints/Qwen3.6-27B-FP8/LICENSE); [included model card](checkpoints/Qwen3.6-27B-FP8/README.md); [official model](https://huggingface.co/Qwen/Qwen3.6-27B-FP8) |\n| Processed target structures | [CC BY 4.0](targets/LICENSE), as distributed by Proteina-Complexa; [attribution and exact public source](targets/ATTRIBUTION.txt) |\n\nThe manifest pins source revisions, exact paths, sizes and hashes. Retain the\nlicenses, notices and attribution files when redistributing. Backend software,\nPyRosetta and third-party executables are not included in this asset collection.\n\nOfficial GitHub repositories and research references are listed in [CITATIONS.md](CITATIONS.md).\n"
+        },
+        {
+          "path": "setup/serving_requirements.lock.txt",
+          "size": 3862,
+          "sha256": "7dcbdbb0bb1e153020f0500529159b430dafc8d166d6a3eb7deb7a02c81d21fe",
+          "text": "# T-REX publication installation profile (Linux x86_64, Python 3.12.13).\n# Dependency-compatible profile; the historical study inventory is unchanged.\naiohappyeyeballs==2.6.1\naiohttp==3.13.5\naiosignal==1.4.0\nannotated-doc==0.0.4\nannotated-types==0.7.0\nanthropic==0.96.0\nanyio==4.13.0\napache-tvm-ffi==0.1.10\nastor==0.8.1\nattrs==26.1.0\nbiopython==1.86\nblake3==1.0.8\ncachetools==7.0.5\ncbor2==5.9.0\ncertifi==2026.2.25\ncffi==2.0.0\ncharset-normalizer==3.4.7\nclick==8.3.2\ncloudpickle==3.1.2\ncompressed-tensors==0.14.0.1\ncryptography==46.0.7\ncuda-bindings==12.9.4\ncuda-pathfinder==1.5.3\ncuda-python==12.9.4\ndepyf==0.20.0\ndill==0.4.1\ndiskcache==5.6.3\ndistro==1.9.0\ndnspython==2.8.0\ndocstring-parser==0.18.0\neinops==0.8.2\nemail-validator==2.3.0\nfastapi==0.136.0\nfastapi-cli==0.0.24\nfastapi-cloud-cli==0.17.0\nfastar==0.11.0\nfilelock==3.28.0\nflashinfer-cubin==0.6.6\nflashinfer-python==0.6.6\nfrozenlist==1.8.0\nfsspec==2026.3.0\ngguf==0.18.0\ngoogleapis-common-protos==1.74.0\ngrpcio==1.80.0\nh11==0.16.0\nhf-xet==1.4.3\nhttpcore==1.0.9\nhttptools==0.7.1\nhttpx==0.28.1\nhttpx-sse==0.4.3\nhuggingface-hub==0.36.2\nidna==3.11\nijson==3.5.0\nimportlib-metadata==8.7.1\ninquirerpy==0.3.4\ninteregular==0.3.3\njinja2==3.1.6\njiter==0.14.0\njmespath==1.1.0\njsonschema==4.26.0\njsonschema-specifications==2025.9.1\nlark==1.2.2\nllguidance==1.3.0\nllvmlite==0.44.0\nlm-format-enforcer==0.11.3\nloguru==0.7.3\nmarkdown-it-py==4.0.0\nmarkupsafe==3.0.3\nmcp==1.27.0\nmdurl==0.1.2\nmistral-common==1.11.0\nmodel-hosting-container-standards==0.1.14\nmpmath==1.3.0\nmsgspec==0.21.1\nmultidict==6.7.1\nnetworkx==3.6.1\nninja==1.13.0\nnumba==0.61.2\nnumpy==2.2.6\nnvidia-cublas-cu12==12.8.4.1\nnvidia-cuda-cupti-cu12==12.8.90\nnvidia-cuda-nvrtc-cu12==12.8.93\nnvidia-cuda-runtime-cu12==12.8.90\nnvidia-cudnn-cu12==9.10.2.21\nnvidia-cudnn-frontend==1.18.0\nnvidia-cufft-cu12==11.3.3.83\nnvidia-cufile-cu12==1.13.1.3\nnvidia-curand-cu12==10.3.9.90\nnvidia-cusolver-cu12==11.7.3.90\nnvidia-cusparse-cu12==12.5.8.93\nnvidia-cusparselt-cu12==0.7.1\nnvidia-cutlass-dsl==4.4.2\nnvidia-cutlass-dsl-libs-base==4.4.2\nnvidia-ml-py==13.595.45\nnvidia-nccl-cu12==2.27.5\nnvidia-nvjitlink-cu12==12.8.93\nnvidia-nvshmem-cu12==3.4.5\nnvidia-nvtx-cu12==12.8.90\nopenai==2.32.0\nopenai-harmony==0.0.8\nopencv-python-headless==4.13.0.92\nopentelemetry-api==1.41.0\nopentelemetry-exporter-otlp==1.41.0\nopentelemetry-exporter-otlp-proto-common==1.41.0\nopentelemetry-exporter-otlp-proto-grpc==1.41.0\nopentelemetry-exporter-otlp-proto-http==1.41.0\nopentelemetry-proto==1.41.0\nopentelemetry-sdk==1.41.0\nopentelemetry-semantic-conventions==0.62b0\nopentelemetry-semantic-conventions-ai==0.5.1\noutlines-core==0.2.11\npackaging==26.1\npartial-json-parser==0.2.1.1.post7\npfzy==0.3.4\npillow==12.2.0\nprometheus-client==0.25.0\nprometheus-fastapi-instrumentator==7.1.0\nprompt-toolkit==3.0.52\npropcache==0.4.1\nprotobuf==6.33.6\npsutil==7.2.2\npy-cpuinfo==9.0.0\npybase64==1.4.3\npycountry==26.2.16\npycparser==3.0\npydantic==2.13.2\npydantic-core==2.46.2\npydantic-extra-types==2.11.1\npydantic-settings==2.13.1\npygments==2.20.0\npyjwt==2.12.1\npython-dotenv==1.2.2\npython-json-logger==4.1.0\npython-multipart==0.0.26\npyyaml==6.0.3\npyzmq==27.1.0\nquack-kernels==0.3.10\nreferencing==0.37.0\nregex==2026.4.4\nrequests==2.33.1\nrich==15.0.0\nrich-toolkit==0.19.7\nrignore==0.7.6\nrpds-py==0.30.0\nsafetensors==0.7.0\nsentencepiece==0.2.1\nsentry-sdk==2.58.0\nsetproctitle==1.3.7\nsetuptools==80.10.2\nshellingham==1.5.4\nsix==1.17.0\nsniffio==1.3.1\nsse-starlette==3.3.4\nstarlette==0.52.1\nsupervisor==4.3.0\nsympy==1.14.0\ntabulate==0.10.0\ntiktoken==0.12.0\ntokenizers==0.22.2\ntorch==2.10.0\ntorch-c-dlpack-ext==0.1.5\ntorchaudio==2.10.0\ntorchvision==0.25.0\ntqdm==4.67.3\ntransformers==4.57.6\ntriton==3.6.0\ntyper==0.24.1\ntyping-extensions==4.15.0\ntyping-inspection==0.4.2\nurllib3==2.6.3\nuvicorn==0.44.0\nuvloop==0.22.1\nvllm==0.19.0\nwatchfiles==1.1.1\nwcwidth==0.6.0\nwebsockets==16.0\nxgrammar==0.1.33\nyarl==1.23.0\nzipp==3.23.1\n"
+        },
+        {
+          "path": "setup/serving_environment.json",
+          "size": 1166,
+          "sha256": "f4095edf398b1354c757b8597b5a9a4ec71f5788082e475af3d19f999557af22",
+          "text": "{\n  \"schema_version\": \"trex.serving-installation.v1\",\n  \"python\": \"3.12.13\",\n  \"platform\": \"linux\",\n  \"machine\": \"x86_64\",\n  \"lock\": \"setup/serving_requirements.lock.txt\",\n  \"lock_sha256\": \"7dcbdbb0bb1e153020f0500529159b430dafc8d166d6a3eb7deb7a02c81d21fe\",\n  \"historical_inventory\": \"Study inventory is recorded in the code release; use this profile for installation.\",\n  \"differences_from_historical_inventory\": {\n    \"numpy\": {\n      \"historical\": \"2.4.4\",\n      \"installation\": \"2.2.6\"\n    },\n    \"transformers\": {\n      \"historical\": \"5.6.0.dev0 @ a29df2d916e3b820aecd19d3b5a877abc523ba3c\",\n      \"installation\": \"4.57.6\"\n    },\n    \"huggingface-hub\": {\n      \"historical\": \"1.11.0\",\n      \"installation\": \"0.36.2\"\n    }\n  },\n  \"validation\": {\n    \"dependency_check\": \"passed; 179 distributions\",\n    \"config_and_tokenizer\": \"passed for the pinned Qwen snapshot\",\n    \"gpu_smoke\": \"H100, CUDA toolkit 12.8, vLLM 0.19.0, max_model_len 65536, thinking disabled; direct text generation and OpenAI-compatible HTTP request through the T-REX client passed.\",\n    \"scope\": \"Installation/LLM validation only; this profile has not reproduced full study campaigns.\"\n  }\n}\n"
+        },
+        {
+          "path": "setup/complexa_requirements.lock.txt",
+          "size": 5035,
+          "sha256": "f332774971ec39fb3cafd9244fe6be06ceed889b0a18b2ea0b05f76d4ac36457",
+          "text": "--index-url https://pypi.org/simple\n--extra-index-url https://download.pytorch.org/whl/cu126\n--find-links https://data.pyg.org/whl/torch-2.7.0+cu126.html\n--find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html\n\nabsl-py==2.4.0\naiohappyeyeballs==2.6.1\naiohttp==3.13.3\naiosignal==1.4.0\nalphafold-colabfold==2.3.7\nannotated-doc==0.0.4\nannotated-types==0.7.0\nantlr4-python3-runtime==4.9.3\nanyio==4.13.0\nappdirs==1.4.4\nassertpy==1.1\nastor==0.8.1\nasttokens==3.0.1\natomworks==2.2.0\nattrs==26.1.0\nattrs-strict==1.0.1\nbeartype==0.22.9\nbeautifulsoup4==4.15.0\nbiopandas==0.5.1\nbiopython==1.86\nbioservices==1.11.2\nbiotite==1.4.0\nbiotraj==1.2.2\ncattrs==26.1.0\ncertifi==2026.2.25\ncftime==1.6.5\ncharset-normalizer==3.4.6\nchex==0.1.87\nclick==8.3.1\ncolorama==0.4.6\ncolorlog==6.12.0\ncomm==0.2.3\ncontextlib2==21.6.0\ncontourpy==1.3.3\ncoverage==7.13.5\ncpdb-protein==0.2.0\ncuequivariance==0.9.1\ncuequivariance-ops-cu12==0.9.1\ncuequivariance-ops-torch-cu12==0.9.1\ncuequivariance-torch==0.9.1\ncycler==0.12.1\ncython==3.2.4\ncytoolz==0.12.3\ndebugpy==1.8.20\ndecorator==5.2.1\ndeepdiff==8.6.2\ndm-haiku==0.0.16\ndm-tree==0.1.8\neasydev==0.14.0\neinops==0.8.2\neinx==0.4.2\nenvirons==11.2.1\netils==1.14.0\nexecnet==2.1.2\nexecuting==2.2.1\nfilelock==3.25.2\nflax==0.9.0\nflexcache==0.3\nflexparser==0.4\nfonttools==4.62.1\nfrozendict==2.4.7\nfrozenlist==1.8.0\nfsspec==2026.2.0\ngevent==26.9.0\ngitdb==4.0.12\ngitpython==3.1.46\ngraphein==1.7.7\ngreenlet==3.5.6\ngrequests==0.7.0\nh11==0.16.0\nh5py==3.16.0\nhf-xet==1.4.2\nhttpcore==1.0.9\nhttpx==0.28.1\nhuggingface-hub==1.7.2\nhumanize==4.16.0\nhydra-core==1.3.1\nhydride==1.2.3\nhypothesis==6.151.9\nidna==3.11\nimmutabledict==4.3.1\niniconfig==2.3.0\nipykernel==7.2.0\nipython==9.11.0\nipython-pygments-lexers==1.1.1\njax==0.4.29\njax-cuda12-pjrt==0.4.29\njax-cuda12-plugin==0.4.29\njaxlib==0.4.29+cuda12.cudnn91\njaxtyping==0.3.9\njedi==0.19.2\njinja2==3.1.6\njmp==0.0.4\njoblib==1.4.2\njsonschema==4.26.0\njsonschema-specifications==2025.9.1\njupyter-client==8.8.0\njupyter-core==5.9.1\nkiwisolver==1.5.0\nlightning==2.5.6\nlightning-utilities==0.15.3\nline-profiler==5.0.2\nllvmlite==0.46.0\nloguru==0.7.2\nlooseversion==1.1.2\nloralib==0.1.2\nlxml==6.1.3\nmarkdown-it-py==4.0.0\nmarkupsafe==3.0.2\nmarshmallow==4.2.2\nmatplotlib==3.10.8\nmatplotlib-inline==0.2.1\nmdtraj==1.10.2\nmdurl==0.1.2\nml-collections==0.1.1\nml-dtypes==0.5.4\nmmtf-python==1.1.3\nmodin==0.37.1\nmpmath==1.3.0\nmsgpack==1.1.2\nmultidict==6.7.1\nmultipledispatch==1.0.0\nmypy-extensions==1.0.0\nnarwhals==2.18.1\nnest-asyncio==1.6.0\nnetcdf4==1.7.4\nnetworkx==3.6.1\nninja==1.13.0\nnumba==0.64.0\nnumpy==1.26.4\nnvidia-cublas-cu12==12.6.4.1\nnvidia-cuda-cupti-cu12==12.6.80\nnvidia-cuda-nvcc-cu12==12.9.86\nnvidia-cuda-nvrtc-cu12==12.6.77\nnvidia-cuda-runtime-cu12==12.6.77\nnvidia-cudnn-cu12==9.5.1.17\nnvidia-cufft-cu12==11.3.0.4\nnvidia-cufile-cu12==1.11.1.6\nnvidia-curand-cu12==10.3.7.77\nnvidia-cusolver-cu12==11.7.1.2\nnvidia-cusparse-cu12==12.5.4.2\nnvidia-cusparselt-cu12==0.6.3\nnvidia-ml-py==13.595.45\nnvidia-nccl-cu12==2.26.2\nnvidia-nvjitlink-cu12==12.6.85\nnvidia-nvtx-cu12==12.6.77\nomegaconf==2.3.0\nopenbabel-wheel==3.1.1.22\nopt-einsum==3.4.0\noptax==0.2.3\norbax-checkpoint==0.6.4\norderly-set==5.5.0\npackaging==26.0\npandas==2.3.3\nparso==0.8.6\npexpect==4.9.0\npillow==12.1.1\npint==0.25.3\nplatformdirs==4.9.4\nplotly==6.6.0\npluggy==1.6.0\nprody==2.6.1\nprompt-toolkit==3.0.52\npropcache==0.4.1\nprotobuf==6.33.6\npsutil==7.2.2\nptyprocess==0.7.0\npure-eval==0.2.3\npy-cpuinfo==9.0.0\npy3dmol==2.5.4\npyarrow==17.0.0\npydantic==2.12.5\npydantic-core==2.41.5\npygments==2.19.2\npymol-remote==1.1.0\npyparsing==3.1.1\npytest==8.4.2\npytest-benchmark==5.2.3\npytest-cov==4.1.0\npytest-dotenv==0.5.2\npytest-testmon==2.2.0\npytest-xdist==3.8.0\npython-dateutil==2.9.0.post0\npython-dotenv==1.0.1\npytorch-lightning==2.6.1\npytz==2026.1.post1\npyyaml==6.0.3\npyzmq==27.1.0\nray==2.54.0\nrc-foundry==0.1.12\nrdkit==2025.3.6\nreferencing==0.37.0\nregex==2026.2.28\nrequests==2.32.5\nrequests-cache==1.3.3\nrich==14.0.0\nrich-click==1.9.7\nrootutils==1.0.7\nrpds-py==0.30.0\nruff==0.8.3\nsafetensors==0.7.0\nscikit-learn==1.8.0\nscipy==1.17.1\nseaborn==0.13.2\nsentry-sdk==2.56.0\nsetuptools==70.2.0\nshellingham==1.5.4\nsix==1.17.0\nsmmap==5.0.3\nsortedcontainers==2.4.0\nsoupsieve==2.9.2\nsparse==0.18.0\nstack-data==0.6.3\nsuds-community==1.2.0\nsympy==1.14.0\ntabulate==0.10.0\ntensorstore==0.1.66\nthreadpoolctl==3.6.0\ntmol @ git+https://github.com/uw-ipd/tmol.git@d8a6f7f9649d36e74440bca25246ee7c467ce490\ntokenizers==0.22.2\ntoolz==1.1.0\ntorch==2.7.0+cu126\ntorch-cluster==1.6.3+pt27cu126\ntorch-geometric==2.7.0\ntorch-scatter==2.1.2+pt27cu126\ntorch-sparse==0.6.18+pt27cu126\ntorchaudio==2.7.0+cu126\ntorchmetrics==1.9.0\ntorchvision==0.22.0+cu126\ntornado==6.5.5\ntqdm==4.66.4\ntraitlets==5.14.3\ntransformers==5.3.0\ntriton==3.3.0\ntyper==0.24.1\ntyping-extensions==4.15.0\ntyping-inspect==0.9.0\ntyping-inspection==0.4.2\ntzdata==2025.3\nurl-normalize==3.0.0\nurllib3==2.6.3\nwadler-lindig==0.1.7\nwandb==0.23.1\nwcwidth==0.6.0\nwget==3.2\nwrapt==2.4.1\nxarray==2026.2.0\nxmltodict==1.0.4\nxxhash==3.6.0\nyarl==1.23.0\nzipp==4.1.0\nzope-event==6.2\nzope-interface==8.6\nzstandard==0.25.0\n"
+        },
+        {
+          "path": "setup/bindcraft_requirements.lock.txt",
+          "size": 1719,
+          "sha256": "b5e3b4e24c82bab803d606a2dbcc066690cc2ff86d60471e6438fb2b83ebda5b",
+          "text": "# Compatible bindcraft installation profile; not the exact study inventory.\n# Python 3.10.20; obtain PyRosetta under its upstream license.\nabsl-py==2.5.0\naiofiles==25.1.0\nattrs==26.1.0\nbiopython==1.88\nchex==0.1.90\ncloudpickle==3.1.2\ncolabdesign @ git+https://github.com/sokrypton/ColabDesign.git@e31a56fe1d9b4de25c8697f3a28b75892941cc72\ncontourpy==1.3.2\ncycler==0.12.1\ndm-haiku==0.0.17\ndm-tree==0.1.10\netils==1.13.0\nflax==0.9.0\nfonttools==4.65.0\nfsspec==2026.9.0\nhumanize==4.16.0\nimmutabledict==4.3.1\nimportlib-resources==7.1.0\njax==0.6.0\njax-cuda12-pjrt==0.6.0\njax-cuda12-plugin==0.6.0\njaxlib==0.6.0\njmp==0.0.4\njoblib==1.6.0\nkiwisolver==1.5.1\nmarkdown-it-py==4.2.0\nmatplotlib==3.10.9\nmdurl==0.1.2\nml-collections==1.1.0\nml-dtypes==0.5.4\nmsgpack==1.2.2\nnumpy==1.26.4\nnvidia-cublas-cu12==12.9.2.10\nnvidia-cuda-cupti-cu12==12.9.79\nnvidia-cuda-nvcc-cu12==12.9.86\nnvidia-cuda-nvrtc-cu12==12.9.86\nnvidia-cuda-runtime-cu12==12.9.79\nnvidia-cudnn-cu12==9.26.0.51\nnvidia-cufft-cu12==11.4.1.4\nnvidia-cusolver-cu12==11.7.5.82\nnvidia-cusparse-cu12==12.5.10.65\nnvidia-nccl-cu12==2.31.2\nnvidia-nvjitlink-cu12==12.9.86\nopenmm==8.6.1\nopt-einsum==3.4.0\noptax==0.2.8\norbax-checkpoint==0.11.39\npackaging==26.3\npandas==2.3.3\npdbfixer @ git+https://github.com/openmm/pdbfixer.git@94cfa4c0ca551cdc5f13320f9a658efd59f2b881\npillow==12.3.0\nprotobuf==7.36.2\npsutil==7.2.2\npy3dmol==2.5.5\npygments==2.21.0\npyparsing==3.3.3\npyrosetta==2026.3+releasequarterly.5e498f1409\npython-dateutil==2.9.0.post0\npytz==2026.3.post1\npyyaml==6.0.3\nrich==15.0.0\nscipy==1.15.3\nseaborn==0.13.2\nsimplejson==4.1.2\nsix==1.17.0\ntabulate==0.10.0\ntensorstore==0.1.78\ntoolz==1.1.0\ntqdm==4.70.1\ntyping-extensions==4.16.0\ntzdata==2026.4\nuvloop==0.22.1\nwrapt==2.4.1\nzipp==4.1.0\n"
+        },
+        {
+          "path": "setup/boltzgen_requirements.lock.txt",
+          "size": 2109,
+          "sha256": "5e2f3f6e4a824f1c2f9b11fceb78baaf0e153623f8005cd670a498c24373c9c6",
+          "text": "# Compatible boltzgen installation profile; not the exact study inventory.\n# Python 3.12.13; install the pinned local BoltzGen checkout separately.\naiohappyeyeballs==2.7.1\naiohttp==3.14.3\naiosignal==1.4.0\nantlr4-python3-runtime==4.9.3\nanyio==4.15.1\nattrs==26.1.0\nbiopython==1.88\nbiotite==1.7.1\nbiotraj==1.2.2\ncertifi==2026.7.22\ncharset-normalizer==3.5.1\nclick==8.5.0\ncloudpickle==3.1.2\ncontourpy==1.4.0\ncuda-bindings==13.4.2\ncuda-pathfinder==1.8.2\ncuda-toolkit==13.0.3.0\ncuequivariance==0.11.1\ncuequivariance-ops-cu12==0.11.1\ncuequivariance-ops-torch-cu12==0.11.1\ncuequivariance-torch==0.11.1\ncycler==0.12.1\nedit-distance==1.0.9\neinops==0.8.2\neinx==0.4.3\nfilelock==4.0.1\nfonttools==4.65.0\nfrozendict==2.4.7\nfrozenlist==1.8.0\nfsspec==2026.9.0\ngemmi==0.7.5\nh11==0.16.0\nhf-xet==1.6.0\nhttpcore==1.0.9\nhttpx==0.28.1\nhuggingface-hub==1.32.0\nhydra-core==1.3.7\nhydride==1.2.3\nidna==3.20\njinja2==3.1.6\njoblib==1.6.0\nkiwisolver==1.5.1\nlightning-utilities==0.15.3\nllvmlite==0.44.0\nlogomaker==0.8.7\nmarkupsafe==3.0.3\nmashumaro==3.22\nmatplotlib==3.11.2\nmpmath==1.3.0\nmsgpack==1.2.2\nmultidict==6.9.0\nnarwhals==2.26.0\nnetworkx==3.6.1\nnumba==0.61.0\nnumpy==2.0.2\nnvidia-cublas==13.1.1.3\nnvidia-cublas-cu12==12.9.2.10\nnvidia-cuda-cupti==13.0.85\nnvidia-cuda-nvrtc==13.0.88\nnvidia-cuda-nvrtc-cu12==12.9.86\nnvidia-cuda-runtime==13.0.96\nnvidia-cudnn-cu13==9.24.0.43\nnvidia-cufft==12.0.0.61\nnvidia-cufile==1.15.1.6\nnvidia-curand==10.4.0.35\nnvidia-cusolver==12.0.4.66\nnvidia-cusparse==12.6.3.3\nnvidia-cusparselt-cu13==0.8.1\nnvidia-ml-py==13.610.43\nnvidia-nccl-cu13==2.30.7\nnvidia-nvjitlink==13.4.92\nnvidia-nvshmem-cu13==3.4.5\nnvidia-nvtx==13.0.85\nomegaconf==2.3.1\nopt-einsum==3.4.0\npackaging==26.3\npandas==3.0.6\npdbeccdutils==1.0.4\npillow==12.3.0\nplatformdirs==4.11.11\npropcache==0.5.4\npydssp==0.9.1\npyparsing==3.3.3\npython-dateutil==2.9.0.post0\npytorch-lightning==2.6.6\npyyaml==6.0.3\nrdkit==2026.3.6\nrequests==2.34.2\nscikit-learn==1.9.1\nscipy==1.18.1\nsetuptools==84.0.0\nsix==1.17.0\nsympy==1.14.0\nthreadpoolctl==3.7.0\ntorch==2.14.0\ntorchmetrics==1.9.0\ntqdm==4.70.1\ntriton==3.8.0\ntyping-extensions==4.16.0\nurllib3==2.8.0\nyarl==1.25.1\n"
+        },
+        {
+          "path": "setup/complexa-dependencies.patch",
+          "size": 515,
+          "sha256": "45e5e885a4597c33423c8edac1372e56c353105907d9f6973722f0e16b76fe49",
+          "text": "diff --git a/pyproject.toml b/pyproject.toml\nindex 23e91a1..ef84047 100644\n--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -6,7 +6,7 @@ requires-python = \">=3.12\"\n dependencies = [\n     # Core utilities\n     \"python-dotenv==1.0.1\",\n-    \"einops==0.6\",\n+    \"einops==0.8.2\",\n     \"dm-tree==0.1.8\",\n     \"loguru==0.7.2\",\n     \"numpy>=1.23.5\",\n@@ -29,7 +29,7 @@ dependencies = [\n     \n     # Data processing\n     \"pandas>=2.3.0\",\n-    \"scipy==1.12.0\",\n+    \"scipy==1.17.1\",\n     \"h5py\",\n     \"xarray\",\n     \"modin[ray]\",\n"
+        },
+        {
+          "path": "setup/bindcraft-production.patch",
+          "size": 174,
+          "sha256": "dc69de94f8b21a14ebd26e13f41330676161df63b29340fa90d15100f7406268",
+          "text": "diff --git a/functions/DAlphaBall.gcc b/functions/DAlphaBall.gcc\nold mode 100644\nnew mode 100755\ndiff --git a/functions/dssp b/functions/dssp\nold mode 100644\nnew mode 100755\n"
+        },
+        {
+          "path": "setup/complexa_environment.json",
+          "size": 2444,
+          "sha256": "3c7a40b04b5d0c7f157adb1efa33846273be7d08c5affe2eb112c6c2a52c7900",
+          "text": "{\n  \"schema_version\": \"trex.complexa-installation.v1\",\n  \"python\": \"3.12.13\",\n  \"platform\": \"linux\",\n  \"machine\": \"x86_64\",\n  \"uv\": \"0.11.1\",\n  \"repository\": \"https://github.com/NVIDIA-BioNeMo/Proteina-Complexa\",\n  \"git_commit\": \"5ae24b055d828918296f2aad63616b1f4cc0e491\",\n  \"source_trees\": {\n    \"src/proteinfoundation\": \"95023516f000d4b301505d2967bb3daa136c5598\",\n    \"community_models/colabdesign\": \"844c76c09355e094a29a34c16fead3f63dea3819\",\n    \"community_models/ProteinMPNN\": \"6825955f4c3dec0ada2dd0f1a969f61515bd24d2\"\n  },\n  \"lock\": \"setup/complexa_requirements.lock.txt\",\n  \"lock_sha256\": \"f332774971ec39fb3cafd9244fe6be06ceed889b0a18b2ea0b05f76d4ac36457\",\n  \"dependency_patch\": \"setup/complexa-dependencies.patch\",\n  \"dependency_patch_sha256\": \"45e5e885a4597c33423c8edac1372e56c353105907d9f6973722f0e16b76fe49\",\n  \"patched_pyproject_sha256\": \"3cb420d3f72a182eb1c016f1ee254be374b1a24389aa7aec35c110fcb6e6b1dd\",\n  \"metadata_corrections\": {\n    \"einops\": {\n      \"declared\": \"0.6\",\n      \"installation\": \"0.8.2\",\n      \"reason\": \"Satisfies rc-foundry and atomworks extra dependencies.\"\n    },\n    \"scipy\": {\n      \"declared\": \"1.12.0\",\n      \"installation\": \"1.17.1\",\n      \"reason\": \"Satisfies the SciPy requirements of atomworks and biotraj.\"\n    }\n  },\n  \"changed_installed_versions\": {\n    \"numpy\": {\n      \"previous\": \"2.4.3\",\n      \"installation\": \"1.26.4\"\n    },\n    \"biotite\": {\n      \"previous\": \"1.6.0\",\n      \"installation\": \"1.4.0\"\n    },\n    \"chex\": {\n      \"previous\": \"0.1.91\",\n      \"installation\": \"0.1.87\"\n    },\n    \"optax\": {\n      \"previous\": \"0.2.8\",\n      \"installation\": \"0.2.3\"\n    },\n    \"torchaudio\": {\n      \"previous\": \"2.11.0+cu126\",\n      \"installation\": \"2.7.0+cu126\"\n    }\n  },\n  \"scope\": \"A compatible Complexa/AtomWorks/AF2/ProteinMPNN environment. Source code and checkpoint bytes are unchanged. Full campaign output equality is not established.\",\n  \"validation\": {\n    \"fresh_installation\": \"passed\",\n    \"repeat_installation\": \"passed\",\n    \"dependency_check\": \"passed: 256 installed packages; 254 locked third-party dependencies\",\n    \"backend_imports_and_config\": \"passed\",\n    \"gpu_smoke\": \"passed: NVIDIA H100 80GB; PyTorch/JAX/Flax/Optax/Orbax\",\n    \"checkpoint_loading\": \"passed: AF2 parameters, Complexa generator and autoencoder\",\n    \"representative_inference\": \"passed: Complexa generation, canonical AF2 evaluation and ProteinMPNN redesign\",\n    \"full_design_campaign\": \"not tested\"\n  }\n}\n"
+        }
+      ]
+    }
+  },
+  "source_note": "Pinned checkpoints and target structures with installation profiles, source hashes and license notices. Backend software and environments are installed separately."
+}

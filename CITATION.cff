@@ -1,9 +1,9 @@
 cff-version: 1.2.0
-message: "If you use T-ReX, please cite this software and the accompanying manuscript."
-title: "T-ReX: evidence-guided adaptive allocation improves structure-unique throughput in de novo binder design"
+message: "If you use T-REX, please cite this software and the accompanying manuscript."
+title: "T-REX: evidence-guided adaptive allocation improves structure-unique throughput in de novo binder design"
 type: software
-version: 0.1.1
-date-released: 2026-09-19
+version: 0.1.2
+date-released: 2026-09-20
 authors:
   - family-names: Jeon
     given-names: Minkyu
@@ -13,5 +13,5 @@ authors:
     given-names: Jeff
   - family-names: Zhong
     given-names: Ellen D.
-repository-code: "https://github.com/minkyujeon/T-ReX"
+repository-code: "https://github.com/ml-struct-bio/T-REX"
 license: MIT

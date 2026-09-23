@@ -1,4 +1,4 @@
-"""Reproducibility metadata for T-ReX production runs.
+"""Reproducibility metadata for T-REX production runs.
 
 The scientific archive is append-only, but a result is not reproducible unless
 the controller source, model, target, external backends, and runtime settings
@@ -73,7 +73,7 @@ def _digest_rows(rows: Iterable[tuple[str, int, str]]) -> str:
 
 
 def source_tree_digest(source_root: Path) -> tuple[str, int]:
-    """Hash the publication-relevant T-ReX source and launch configuration."""
+    """Hash the publication-relevant T-REX source and launch configuration."""
     roots = [
         source_root / "trex",
         source_root / "config" / "trex",
@@ -82,7 +82,7 @@ def source_tree_digest(source_root: Path) -> tuple[str, int]:
         source_root / "scripts",
     ]
     explicit = [
-        source_root / "slurm" / "trex_per_target_node.slurm",
+        source_root / "slurm" / "T-REX.slurm",
         source_root / "pyproject.toml",
         source_root / "README.md",
         source_root / "docs" / "all_prompts.py",
@@ -105,7 +105,7 @@ def source_tree_digest(source_root: Path) -> tuple[str, int]:
         for path in sorted(set(files))
     ]
     if not rows:
-        raise RuntimeError(f"no T-ReX source files found under {source_root}")
+        raise RuntimeError(f"no T-REX source files found under {source_root}")
     return _digest_rows(rows), len(rows)
 
 
@@ -329,7 +329,7 @@ def git_state(
 
     Untracked source changes are not representable in ``git diff HEAD``. They
     are nevertheless part of the execution state and must make ``dirty`` true;
-    the T-ReX source-tree digest records their bytes independently.
+    the T-REX source-tree digest records their bytes independently.
     """
     with _git_probe_lock(path):
         head = _run_text(["git", "rev-parse", "HEAD"], path)

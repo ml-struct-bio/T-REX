@@ -1,7 +1,4 @@
-"""Tests for the two architecture prototypes:
-  #2 unified_reasoner — derive the Supervisor ranking from Planner cards (no 2nd LLM call).
-  #3 diagnosis_outcome — close the diagnosis→outcome loop over the archive lineage.
-"""
+"""Test deterministic Supervisor derivation and parent-child diagnosis outcomes."""
 from __future__ import annotations
 
 from trex.diagnosis_outcome import (

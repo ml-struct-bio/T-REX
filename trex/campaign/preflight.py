@@ -69,7 +69,7 @@ def _input_checks(campaign: ResolvedCampaign) -> list[Check]:
             campaign.source_sha256,
         ),
         Check(
-            "executed T-ReX source",
+            "executed T-REX source",
             "ok" if configured_source_root == executed_source_root else "fail",
             (
                 str(executed_source_root)

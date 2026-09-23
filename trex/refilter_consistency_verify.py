@@ -1,18 +1,10 @@
-"""Verify success-metric consistency across families by re-folding sampled
-designs through ONE AF2 refilter (recycles=3, residue-count chain detection).
+"""Compare native BindCraft and Complexa scores with standardized AF2 evaluation.
 
-For a sample of BindCraft + Complexa designs that pass each family's NATIVE
-strict criterion, re-fold the complex with af2_refilter_runner (the unified
-ColabDesign AF2-multimer scorer) and compare native vs refilter metrics.
+Sample designs, run af2_refilter_runner, and report score differences and
+qualification agreement. This utility requires an AF2/ColabDesign environment
+and a GPU.
 
-Answers:
-  - Do good designs get low scRMSD under recycles=3 (validates the recycles
-    0->3 + chain-detection fix)?
-  - What fraction of each family's NATIVE-strict designs stay strict under the
-    unified refilter (true comparable strict rate)?
-  - Does Complexa native af2folding agree with the unified refilter?
-
-Usage (under the AF2/ColabDesign venv, 1 GPU):
+Usage:
   python -m trex.refilter_consistency_verify --n-per-family 12 --out report.json
 """
 

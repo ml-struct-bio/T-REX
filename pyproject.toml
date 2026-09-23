@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trex-binder-design"
-version = "0.1.1"
+version = "0.1.2"
 description = "Evidence-guided adaptive allocation across de novo protein-binder design pipelines"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+assets = ["gdown==6.4.0"]
 providers = [
   "anthropic>=0.40",
   "google-genai>=1.0",
@@ -42,9 +43,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/minkyujeon/T-ReX"
-Repository = "https://github.com/minkyujeon/T-ReX"
-Issues = "https://github.com/minkyujeon/T-ReX/issues"
+Homepage = "https://github.com/ml-struct-bio/T-REX"
+Repository = "https://github.com/ml-struct-bio/T-REX"
+Issues = "https://github.com/ml-struct-bio/T-REX/issues"
 
 
 [project.scripts]

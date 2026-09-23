@@ -1,4 +1,4 @@
-"""Fail-closed installation and target validation for T-ReX.
+"""Fail-closed installation and target validation for T-REX.
 
 This module validates the *execution contract* without launching an LLM or a
 GPU worker.  It is intentionally stricter than an import smoke: enabled
@@ -131,6 +131,45 @@ def _git_diff_sha256(path: Path) -> str | None:
         return None
     diff = proc.stdout.strip()
     return hashlib.sha256(diff.encode()).hexdigest() if diff else None
+
+
+def _equivalent_source_checks(
+    path: Path, component: str, source_trees: dict[str, str]
+) -> list[Check]:
+    """Verify unchanged source subtrees in an explicitly permitted public checkout."""
+    checks: list[Check] = []
+    if not source_trees:
+        return [
+            Check(f"{component} source equivalence", "fail", "no source trees declared")
+        ]
+    for relative, expected in sorted(source_trees.items()):
+        try:
+            tree = subprocess.run(
+                ["git", "rev-parse", "--verify", f"HEAD:{relative}"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            diff = subprocess.run(
+                ["git", "diff", "--quiet", "HEAD", "--", relative],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            observed = tree.stdout.strip() if tree.returncode == 0 else None
+            ok = observed == expected and diff.returncode == 0
+            detail = (
+                f"tree={observed or '<unavailable>'} expected={expected} "
+                f"tracked_source_unchanged={diff.returncode == 0}"
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            ok, detail = False, str(exc)
+        checks.append(
+            Check(f"{component} source {relative}", "ok" if ok else "fail", detail)
+        )
+    return checks
 
 
 def _target_checks(
@@ -579,16 +618,34 @@ def validate_install(
         for name, (path, enabled) in paths.items():
             if not enabled:
                 continue
-            expected = stack.get("components", {}).get(name, {}).get("git_commit")
+            component = stack.get("components", {}).get(name, {})
+            expected = component.get("git_commit")
             if path and path.is_dir() and expected:
                 observed = _git_head(path)
+                exact_revision = observed == expected
+                equivalent_checks: list[Check] = []
+                if not exact_revision and observed in component.get(
+                    "equivalent_git_commits", []
+                ):
+                    equivalent_checks = _equivalent_source_checks(
+                        path, name, component.get("equivalent_source_trees", {})
+                    )
+                equivalent_revision = bool(equivalent_checks) and all(
+                    check.passed for check in equivalent_checks
+                )
                 checks.append(
                     Check(
                         f"{name} revision",
-                        "ok" if observed == expected else "fail",
-                        f"expected={expected} observed={observed or '<unavailable>'}",
+                        "ok" if exact_revision or equivalent_revision else "fail",
+                        f"expected={expected} observed={observed or '<unavailable>'}"
+                        + (
+                            "; identical declared source trees"
+                            if equivalent_revision
+                            else ""
+                        ),
                     )
                 )
+                checks.extend(equivalent_checks)
             if name == "bindcraft" and path and path.is_dir():
                 component = stack.get("components", {}).get(name, {})
                 patch_name = component.get("patch")

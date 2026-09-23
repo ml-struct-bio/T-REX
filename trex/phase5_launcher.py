@@ -1,20 +1,7 @@
-"""Phase 5 outer launcher daemon (§22.1).
+"""Test-mode launcher for asynchronous worker-pool simulations.
 
-Async event-driven: maintains a pool of N worker slots; each completion
-triggers exactly one new plan_one_slot call + replacement launch on the
-freed GPU. NOT a sync 3-batch loop.
-
-Run mode:
-  - test : substitutes SLURM submission with a stub that echoes the
-           command to a JSONL log + immediately marks the job as
-           "complete" once a pre-staged output dir appears. Use for
-           §22.1.1 T1 acceptance smoke.
-
-Production live campaigns are handled by controller.py. This
-module intentionally keeps live submission unimplemented.
-
-Output parsers are dispatched by ActionCandidate.method_family
-(see trex/output_parsers/).
+Use staged backend outputs and recorded stub submissions. Live campaign execution
+belongs to controller.py; live submission is not implemented here.
 """
 
 from __future__ import annotations
@@ -34,18 +21,13 @@ from .output_parsers.bindcraft import parse_bindcraft_output
 from .output_parsers.complexa import parse_complexa_output
 
 
-# Per-family parser registry. This launcher is the test-mode smoke harness
-# (submit_live_mode is deferred to controller.py for production).
-# B-012 cleanup (2026-05-27): unsupported legacy Complexa aliases
-# entries removed — capability_registry no longer exposes them.
+# Parsers supported by the test-mode launcher.
 PARSER_BY_FAMILY = {
     "bindcraft":            parse_bindcraft_output,
     "complexa_beam":        parse_complexa_output,
     "complexa_best_of_n":   parse_complexa_output,
     "complexa_fk_steering": parse_complexa_output,
     "complexa_mcts":        parse_complexa_output,
-    # proteinmpnn, refilter, boltzgen — added when test fixtures
-    # appear (OQ-004). Production parsing happens in controller.
 }
 
 
@@ -91,10 +73,10 @@ def submit_test_mode(candidate: ActionCandidate, output_dir: Path,
 
 
 def submit_live_mode(candidate: ActionCandidate, output_dir: Path) -> str:
-    """Real sbatch path — DEFERRED. Will dispatch per-family SLURM wrappers."""
+    """Reject live submissions; production execution belongs to the controller."""
     raise NotImplementedError(
         "Live SLURM submission per-family wrappers not yet implemented. "
-        "Use --mode=test for §22.1.1 T1 acceptance smoke."
+        "Use --mode=test for staged-output simulations, or trex.controller for live campaigns."
     )
 
 
@@ -301,7 +283,7 @@ def _expected_output_dir(cfg: DaemonConfig, slot: WorkerSlot,
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="T-ReX phase5 outer launcher daemon (§22.1)")
+    p = argparse.ArgumentParser(description="T-REX staged-output worker simulation")
     p.add_argument("--archive-root", type=Path, required=True)
     p.add_argument("--target-id", type=str, required=True)
     p.add_argument("--n-slots", type=int, default=3)
@@ -311,7 +293,7 @@ def main() -> None:
     p.add_argument("--test-output-root", type=Path, default=None,
                     help="(test mode) pre-staged worker output dir to use for "
                           "every test-mode launch — typically a real BindCraft "
-                          "fixture for T1 acceptance.")
+                          "output fixture.")
     args = p.parse_args()
 
     if args.mode == "test" and args.test_output_root is None:

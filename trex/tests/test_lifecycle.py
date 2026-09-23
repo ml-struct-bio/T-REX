@@ -233,7 +233,7 @@ def test_ttl_retires_without_evidence():
     new = update_hypothesis(
         _hyp(),
         healthy_descendants=[],
-        current_tick=21,  # 11 ticks after creation (tick_created=10), TTL=10 (Q30)
+        current_tick=21,  # 11 ticks after creation exceeds the 10-tick lifetime.
         axis_thresholds=default_axis_thresholds(),
     )
     assert new.status == "retired"

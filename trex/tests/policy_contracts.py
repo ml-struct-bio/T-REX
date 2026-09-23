@@ -1,13 +1,10 @@
-"""S2 + S6 + S7 surrogate: deterministic CPU-only smoke.
+"""Run CPU regression tests and deterministic policy checks on synthetic evidence.
 
-Runs unit tests as a script and exercises the state classifier on
-synthetic CD45-like / SC2RBD-like / BetV1-like / CbAgo-like cases.
-No LLM, no GPU. Should complete in <30s.
-
-Outputs a JSON report with pass/fail per check.
+Write a JSON report covering state classification, hypothesis lifecycle, and
+panel diversity. No LLM or GPU is required.
 
 Usage:
-  python -m trex.tests.policy_contracts --out /scratch/.../report.json
+  python -m trex.tests.policy_contracts --out report.json
 """
 
 from __future__ import annotations
@@ -118,11 +115,8 @@ def s2_state_classifier_cases() -> list[dict[str, Any]]:
             ),
         },
         {
-            # v7_3 (review-found MEDIUM): a still-PRODUCING lane (dSU>0, productive
-            # su_rate) that collapsed into one Foldseek basin (top_bin>=0.75) is NO
-            # LONGER abandoned to `stalled` — it routes to `productive_duplicate`
-            # (keep exploiting the winner; the diversity clamp loosens explore on
-            # top_bin>=0.70). The top_bin stalled trigger now requires not-productive.
+            # A productive but structurally repetitive route retains its
+            # productive-duplicate state.
             "name": "top-bin-share collapse while still producing",
             "expected": "productive_duplicate",
             "args": dict(
@@ -249,9 +243,7 @@ def s6_lifecycle_replay() -> list[dict[str, Any]]:
         }
     )
 
-    # Test 3: TTL → retired. With default ttl_ticks=10 (Q30 calibration,
-    # was 3), need current_tick - tick_created >= 10. hyp was created at
-    # tick 10, so current_tick = 21 ⇒ delta = 11 ≥ 10 ⇒ retire.
+    # A card created at tick 10 with a lifetime of 10 ticks is expired at tick 21.
     h3 = update_hypothesis(
         hyp,
         healthy_descendants=[],

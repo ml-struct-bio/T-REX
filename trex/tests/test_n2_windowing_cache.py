@@ -1,8 +1,4 @@
-"""R1/R2/R4 regression tests: clustering-cache exactness + near-miss dedup key.
-
-Stable + fast: NO real Foldseek/mmseqs (monkeypatched fake clusterer). The real
-~5k-structure timing check lives in a manual perf script, not CI.
-"""
+"""Tests for clustering-cache consistency and near-miss deduplication with mocked binaries."""
 
 from __future__ import annotations
 
@@ -89,15 +85,12 @@ def test_failed_status_not_cached(tmp_path, monkeypatch):
     assert calls["n"] == 2, "no_binary (transient failure) must NOT be cached → retried"
 
 
-# --- R2: strategy_feedback near-miss dedup must use foldseek_near_miss ---
 def test_strategy_feedback_near_miss_dedups_on_foldseek_near_miss():
     from trex.evidence_reducer import ReducerConfig, build_strategy_feedback
     from trex.tests.test_recipe_extraction import _ac
 
-    # Two near-misses (binder_scRMSD just over 1.5, within near-pass margin),
-    # same (family,operator,config), DIFFERENT foldseek_near_miss bins but the
-    # SAME stale whole-archive foldseek bin. Correct dedup (foldseek_near_miss)
-    # → 2 distinct near-misses; the old (foldseek) key would collapse to 1.
+    # Distinct near-miss clusters remain distinct despite a shared scored-window
+    # bin.
     def nm(rid, nm_bin):
         return ResultRecord(
             result_id=rid, parent_ids=[], target_id="t", backend_family="complexa_beam",

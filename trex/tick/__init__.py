@@ -1,4 +1,4 @@
-"""Typed phases that compose one scientific T-ReX live tick."""
+"""Typed phases that compose one scientific T-REX live tick."""
 
 from .archive_snapshot import (
     TickArchiveSnapshot,

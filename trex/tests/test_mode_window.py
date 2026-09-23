@@ -1,11 +1,5 @@
-"""K-round window mode realisation (fractional-share survival).
-
-Bug fix (2026-05-28): per-tick `largest_remainder(mixture, n_free)` rounds any
-mode share below 1/n_free to 0 every tick. On the event-driven loop n_free is
-usually 1, so a 0.05-0.10 explore floor never launches anything — the exact
-V6.3 "10% explore rounded to 0" failure T-ReX was built to fix. `_windowed_quotas`
-allocates by largest deficit over a K-round window of realised modes so small
-shares accumulate deficit and win a slot roughly every 1/share launches.
+"""Tests for allocation over a moving window of confirmed starts, including small
+fractional shares.
 """
 
 from __future__ import annotations

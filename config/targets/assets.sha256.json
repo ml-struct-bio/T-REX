@@ -30,16 +30,6 @@
       "sha256": "b4099344abd3c8bea4e8ddbd9ebd5d6c824580904f06211cdbc6bdbf4a4b0e3c",
       "target_id": "28_HER2_AAV"
     },
-    "il17a": {
-      "bytes": 280907,
-      "chains": {
-        "A": {"max_residue": 131, "min_residue": 17, "n_residues": 104},
-        "B": {"max_residue": 127, "min_residue": 19, "n_residues": 109}
-      },
-      "path": "alpha_proteo_targets/4hsa_cropped.pdb",
-      "sha256": "b2c7ba956396d905b339447762a7cd47bbbd1a8a079282f9e5b3b496cc6b209c",
-      "target_id": "37_IL17A"
-    },
     "il7ra": {
       "bytes": 124497,
       "chains": {"B": {"max_residue": 209, "min_residue": 17, "n_residues": 193}},
@@ -72,15 +62,12 @@
       "sha256": "031887e6ef8e94d35bcad371fb3e7c156d99481766438080b3d3917188fcd4b0",
       "target_id": "38_TNFalpha_REPACK"
     },
-    "vegfa": {
-      "bytes": 123443,
-      "chains": {
-        "V": {"max_residue": 107, "min_residue": 14, "n_residues": 94},
-        "W": {"max_residue": 107, "min_residue": 14, "n_residues": 94}
-      },
-      "path": "alpha_proteo_targets/1bj1_cropped.pdb",
-      "sha256": "53941a38339627b09628978f5373b32750e1f26d14253172de36800b44c3d4cf",
-      "target_id": "36_VEGFA"
+    "trka": {
+      "bytes": 63423,
+      "chains": {"X": {"max_residue": 382, "min_residue": 282, "n_residues": 101}},
+      "path": "alpha_proteo_targets/1www_cropped.pdb",
+      "sha256": "09d486c7368f57009e4f750ff17dc5ce86e03ef42dc9e9d153841bfb9e71f9c7",
+      "target_id": "33_TrkA"
     }
   }
 }

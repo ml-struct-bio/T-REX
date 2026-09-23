@@ -19,8 +19,15 @@ def campaign_template(
     asset_root: str | None,
     target_constraint: str | None,
     target_pdb: str | None,
+    max_wall_hours: float = RunConfig.max_wall_hours,
+    total_gpus: int = 4,
 ) -> dict[str, Any]:
     """Return a complete template with every user-facing policy visible."""
+
+    if total_gpus < 2:
+        raise ValueError("total_gpus must be at least 2 (one LLM plus one worker)")
+    if max_wall_hours <= 0:
+        raise ValueError("max_wall_hours must be greater than zero")
 
     return {
         "schema_version": CAMPAIGN_SCHEMA_VERSION,
@@ -33,9 +40,9 @@ def campaign_template(
         },
         "run": {
             "archive_root": archive_root,
-            "max_wall_hours": RunConfig.max_wall_hours,
+            "max_wall_hours": max_wall_hours,
             "seed": 0,
-            "worker_gpus": ["1", "2", "3"],
+            "worker_gpus": [str(index) for index in range(1, total_gpus)],
             "enabled_families": list(DEFAULT_FAMILIES),
         },
         "llm": {
@@ -83,6 +90,8 @@ def write_campaign_template(
     asset_root: str | None = None,
     target_constraint: str | None = None,
     target_pdb: str | None = None,
+    max_wall_hours: float = RunConfig.max_wall_hours,
+    total_gpus: int = 4,
     force: bool = False,
 ) -> Path:
     """Write one template, refusing accidental overwrite by default."""
@@ -98,6 +107,8 @@ def write_campaign_template(
         asset_root=asset_root,
         target_constraint=target_constraint,
         target_pdb=target_pdb,
+        max_wall_hours=max_wall_hours,
+        total_gpus=total_gpus,
     )
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     return path

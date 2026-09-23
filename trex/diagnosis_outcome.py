@@ -1,23 +1,9 @@
-"""PROTOTYPE (architecture bottleneck #3): close the diagnosis → outcome loop.
+"""Summarize measurement changes along parent-child design lineages.
 
-The "LLM as a scientist" framing is strongest when the LLM's QUALITATIVE diagnoses
-are testable hypotheses whose outcomes feed back. Today the per-design diagnostic
-blocker (worst_actionable_diagnostic_axis) + the axis→lever map
-(DIAGNOSTIC_AXIS_REMEDIATION) tell the planner WHAT is wrong and WHICH lever to
-pull — but nothing tracks whether pulling that lever actually WORKED.
-
-This module computes, over the archive lineage, the outcome of remediating a
-diagnosed blocker: for every child whose PARENT was blocked on an actionable
-diagnostic axis, did the child IMPROVE that axis, and did it become a strict
-success? Aggregated per axis this yields a learnable signal — e.g.
-"ipTM-blocked parents → remediation improved ipTM in 7/10 and yielded 3 strict
-successes" — that can be surfaced to the Planner so it learns which qualitative
-diagnoses + remediations pay off. This is the feedback half of the scientific loop.
-
-Pure/deterministic; advisory only — never touches strict_success or SU.
-WIRED (2026-06): computed in reduce_evidence (evidence_reducer.py), carried on the
-`diagnosis_outcomes` EvidenceSummary field, kept in the prompt JSON (planner.py
-KEEP_ALWAYS), and rendered in the TL;DR — it reaches the Planner.
+For each axis blocking a parent design, record whether its descendants improve
+that measurement and qualify. The evidence reducer places these advisory
+summaries in EvidenceSummary.diagnosis_outcomes for subsequent LLM input.
+The calculations do not change qualification or SU credit.
 """
 from __future__ import annotations
 

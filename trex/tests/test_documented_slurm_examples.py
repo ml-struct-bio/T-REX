@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SLURM_SUBMISSIONS = [
     block
     for block in re.findall(r"```bash\n(.*?)```", (ROOT / "docs/slurm.md").read_text(), re.S)
-    if "sbatch " in block
+    if "bash scripts/submit.sh" in block
 ]
 
 
@@ -36,7 +36,7 @@ def test_submission_examples_keep_overrides_local(tmp_path, block):
     }
     script = (
         "set -eu\n"
-        "sbatch() { :; }\n"
+        'bash() { test "$1" = scripts/submit.sh; }\n'
         + block
         + '\ntest "$TARGET" = fixture\n'
         + 'test "$TREX_MAX_WALL_H" = 48.0\n'

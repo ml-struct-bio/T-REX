@@ -37,8 +37,7 @@ def prepare_af2_refilter_launch(
 
     delta = config_delta or {}
     model_names = str(delta.get("model_names", "model_1_multimer_v3"))
-    # AF2 multimer needs recycles to converge. The historical value of zero
-    # yielded unusable folds, while Complexa's canonical AF2 route uses three.
+    # Match the standardized AF2 evaluation default.
     num_recycles = int(delta.get("num_recycles", 3))
     argv = (
         str(python),

@@ -1,19 +1,12 @@
-"""T-ReX closed-loop per-target controller.
+"""Run an asynchronous design campaign for one target.
 
-Architecture (one process per target node):
-  vLLM/controller GPU — Planner/Supervisor/Critic calls and orchestration.
-  Worker GPUs — event-driven subprocess slots for generator, redesign, and
-  canonical score-conversion jobs.
+Planner and Supervisor use the LLM endpoint; worker GPUs execute generation,
+redesign, and AF2 evaluation jobs. Deterministic code summarizes results,
+constructs and validates candidates, maintains the queue, and records actual
+worker starts and failures in DispatchRecord entries. The campaign advisory
+guard is deterministic.
 
-Main loop:
-  1. Reap completed worker slots and append ResultRecord / DispatchRecord rows.
-  2. Reduce the archive into EvidenceSummary.
-  3. Planner/Supervisor propose evidence-grounded exploit/rescue/explore work.
-  4. Selector queues LaunchDecision intents.
-  5. Freed worker slots immediately start queued candidates; DispatchRecord is
-     the actual started/failed audit trail.
-
-This file is the production live runner. phase5_launcher.py remains smoke-only.
+This is the live runner. phase5_launcher.py supports staged-output simulation.
 """
 
 from __future__ import annotations
@@ -136,12 +129,19 @@ from .output_parsers.boltzgen import parse_boltzgen_output
 from .output_parsers.complexa import parse_complexa_output
 from .output_parsers.proteinmpnn import parse_proteinmpnn_output
 from .refilter_roles import (
-    CANONICAL_SCORE_CONVERSION, PARENT_MODEL_REFOLD,
-    infer_refilter_role, is_canonical_score_conversion,
+    CANONICAL_SCORE_CONVERSION,
+    PARENT_MODEL_REFOLD,
+    infer_refilter_role,
+    is_canonical_score_conversion,
 )
 from .schemas import (
-    ActionCandidate, DispatchRecord, EvidenceSummary, FeasibilityCheck,
-    LaunchDecision, ResultRecord, TargetConstraint,
+    ActionCandidate,
+    DispatchRecord,
+    EvidenceSummary,
+    FeasibilityCheck,
+    LaunchDecision,
+    ResultRecord,
+    TargetConstraint,
 )
 
 
@@ -165,29 +165,26 @@ P2_BOLTZGEN_REPO = RUNTIME_PATHS.boltzgen_repo
 P2_BOLTZGEN_CACHE = RUNTIME_PATHS.boltzgen_cache
 
 
-# ---- Phase 2: AF2 refilter (shared dependency of BoltzGen / RFdiff /
-#       MPNN pipelines) --------------------------------------------------------
-
 def _exec_af2_refilter_async(
-    cand: ActionCandidate, out_dir: Path, parent_pdb: Path,
-    target_chain: str, binder_chain: str, gpu_id: str,
+    cand: ActionCandidate,
+    out_dir: Path,
+    parent_pdb: Path,
+    target_chain: str,
+    binder_chain: str,
+    gpu_id: str,
     runtime_paths: RuntimePaths | None = None,
 ) -> tuple["subprocess.Popen | None", Path]:
-    """Run T-ReX's AF2 refilter on a parent binder PDB. Returns Popen
-    handle + out_dir; caller wait()s and parses
-    ``out_dir/af2_refilter_result.json``.
+    """Launch standardized AF2 evaluation and return the process handle and output
+    directory.
 
-    Used as the metric-standardisation step for backends that don't include
-    AF2 evaluation internally (BoltzGen, RFdiffusion outputs;
-    MPNN-redesigned sequences). Plan §2.5: every T-ReX generator is funnel-
-    scored through an AF2-class verifier — this is that verifier.
+    The caller waits and parses af2_refilter_result.json for designs requiring separate
+    evaluation.
     """
     paths = runtime_paths or RUNTIME_PATHS
     out_dir.mkdir(parents=True, exist_ok=True)
     if not paths.complexa_python.exists():
         print(
-            "  [SKIP] python missing for AF2 refilter: "
-            f"{paths.complexa_python}",
+            "  [SKIP] python missing for AF2 refilter: " f"{paths.complexa_python}",
             flush=True,
         )
         return None, out_dir
@@ -225,20 +222,13 @@ def _exec_af2_refilter_async(
         stderr=subprocess.STDOUT,
         **_popen_kwargs(),
     )
-    log_fp.close()  # §22.8.5: child has dup'd fd, parent doesn't need to keep its handle
+    log_fp.close()  # The child owns a duplicate file descriptor; close the parent handle.
     return proc, launch.output_dir
 
 
 def _cif_to_pdb(cif_path: Path) -> Path | None:
-    """BUG-A3 fix (2026-05-26): external generators emit CIF outputs
-    and store the path under ``artifacts["pdb_path"]``.
-    Chained AF2 score conversion (``af2_refilter_runner``) calls ColabDesign's
-    ``mk_af_model.prep_inputs(...)`` which only parses PDB format — CIF
-    inputs silently mis-parse.
-
-    This helper converts CIF → PDB once (cached as a sibling file).
-    Returns the converted PDB path or None on failure (caller can then
-    drop the parent and try the next-best one).
+    """Convert CIF to a cached sibling PDB for PDB-only consumers. Return None on
+    conversion failure.
     """
     if cif_path.suffix.lower() != ".cif":
         return cif_path
@@ -247,6 +237,7 @@ def _cif_to_pdb(cif_path: Path) -> Path | None:
         return pdb_path
     try:
         from Bio.PDB import MMCIFParser, PDBIO  # type: ignore
+
         parser = MMCIFParser(QUIET=True)
         structure = parser.get_structure(cif_path.stem, str(cif_path))
         io = PDBIO()
@@ -260,12 +251,9 @@ def _cif_to_pdb(cif_path: Path) -> Path | None:
 
 
 def _pdb_chain_ids(path: Path) -> tuple[str, ...]:
-    """Ordered tuple of distinct chain IDs from a PDB or mmCIF file.
+    """Return distinct chain IDs from ATOM rows in file order.
 
-    Reads ATOM lines only (skips HETATM, headers, REMARK). Identical
-    semantics to V5's `product_router._pdb_chain_ids` (V6.3 used the
-    same helper transitively) — duplicated here so controller
-    does not take a v5-package dependency.
+    Supports PDB and mmCIF input; returns an empty tuple for missing or unreadable files.
     """
     if not path.exists():
         return ()
@@ -291,8 +279,26 @@ def _pdb_chain_ids(path: Path) -> tuple[str, ...]:
 
 
 _STANDARD_AA3 = {
-    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
-    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+    "ALA",
+    "ARG",
+    "ASN",
+    "ASP",
+    "CYS",
+    "GLN",
+    "GLU",
+    "GLY",
+    "HIS",
+    "ILE",
+    "LEU",
+    "LYS",
+    "MET",
+    "PHE",
+    "PRO",
+    "SER",
+    "THR",
+    "TRP",
+    "TYR",
+    "VAL",
 }
 
 
@@ -366,9 +372,10 @@ def _pdb_residues_per_chain(path: Path) -> dict[str, int]:
 
 
 # Set once in main() from --target-pdb. The target chain is COPIED VERBATIM
-# into every complex, so its residue count is fixed and is the reliable way to
-# tell target from binder — "shorter == binder" is WRONG (CD45 target is only
-# 88 res, smaller than many binders; 2026-05-28).
+# into output structures. Production dispatch verifies all target subunit
+# sequences against this reference, independently of output chain labels.
+# Residue counts remain only for compatibility with legacy helper callers.
+TARGET_PDB_PATH: Path | None = None
 TARGET_RES_COUNT: int | None = None
 TARGET_CHAIN_IDS: tuple[str, ...] = ()
 
@@ -387,31 +394,44 @@ def _first_free_chain_id(used: list[str] | tuple[str, ...], default: str = "B") 
     return default or "B"
 
 
-# Campaign-level seed (2026-05-28). Mixed into every seedable generator's
-# per-launch seed_key so two 48H runs of the SAME target with different --seed
-# explore genuinely different structural space — even when the LLM proposes the
-# identical Complexa config (whose seed is otherwise a pure function of
-# candidate_id, which would make the two runs bit-identical). Set once in
-# main() from --seed. (BindCraft has no seed knob and is stochastic by default,
-# so its replicas already diverge; this controls Complexa, AF2 refilter and
-# ProteinMPNN.)
+# Mix the campaign seed into supported backend seeds to distinguish repeated campaigns
+# with identical candidate settings.
 RUN_SEED: int = 0
 
 
 def _resolve_pdb_chains(
-    pdb_path: Path, *,
-    target_default: str = "A", binder_default: str = "B",
+    pdb_path: Path,
+    *,
+    target_default: str = "A",
+    binder_default: str = "B",
     target_res_count: int | None = None,
     target_chain_ids: list[str] | tuple[str, ...] | None = None,
+    target_pdb: Path | None = None,
 ) -> tuple[str, str]:
     """Introspect a parent PDB to pick (target_chain, binder_chain).
 
     Parent PDBs reach the AF2 refilter from heterogeneous sources whose chain
     conventions DIFFER. Prefer the target constraint's chain IDs when a
     multi-chain target is preserved (TNF-alpha A/B/C + binder D). Otherwise use
-    residue-count matching; BoltzGen commonly emits binder A and target B,
-    while BindCraft/Complexa usually preserve target A and binder B.
+    residue-count matching only for legacy callers without a target reference.
+    All production dispatch paths supply target_pdb and verify exact target
+    subunit sequences; unknown or ambiguous roles cannot dispatch.
     """
+    if target_pdb is not None:
+        from .output_identity import resolve_output_chains
+        from .af2_chain_identity import ChainIdentityError
+
+        try:
+            mapping = resolve_output_chains(
+                pdb_path,
+                target_pdb,
+                target_chain_ids or TARGET_CHAIN_IDS,
+            )
+        except ChainIdentityError as exc:
+            raise PermanentDispatchSkip(
+                f"Unresolved parent output chain identity: {exc}"
+            ) from exc
+        return ",".join(mapping["target_chains"]), mapping["binder_chain"]
     counts = _pdb_residues_per_chain(pdb_path)
     if len(counts) < 2:
         return target_default, binder_default
@@ -427,7 +447,8 @@ def _resolve_pdb_chains(
                 binder = max(non_target, key=lambda c: counts[c])
                 return _csv_chains(target_like), binder
         collapsed_target = [
-            c for c, n in counts.items()
+            c
+            for c, n in counts.items()
             if abs(n - tref * len(known)) <= tol * len(known)
         ]
         if len(collapsed_target) == 1:
@@ -462,24 +483,19 @@ def _resolve_pdb_chains(
 
 
 def _resolve_parent_artifact(
-    archive: Archive, cand: ActionCandidate, *,
-    metric: str = "pLDDT", prefer_high: bool = True,
+    archive: Archive,
+    cand: ActionCandidate,
+    *,
+    metric: str = "pLDDT",
+    prefer_high: bool = True,
 ) -> tuple[Path, str] | None:
-    """Find a parent binder PDB + originating result_id for stage-2 backends.
+    """Resolve the candidate parent, or the highest-pLDDT usable result when no parent is
+    specified.
 
-    Strategy:
-      1. If cand.parent_result_id is set, look it up in archive.
-      2. Otherwise pick the highest-pLDDT ResultRecord with a usable PDB.
-      3. Return None if nothing usable — caller skips.
-
-    Returns (pdb_path, result_id) so the caller can populate ParserContext
-    with both. MEDIUM 1 fix (2026-05-26): previously returned only the
-    Path which dropped originating result_id from lineage attribution.
-
-    BUG-A3 fix (2026-05-26): if the candidate artifact is a CIF file,
-    transparently convert to PDB before returning so AF2 refilter (and
-    other PDB-only consumers) get a parseable input.
+    Return (PDB path, result ID), converting CIF when necessary, or None if no usable
+    parent exists.
     """
+
     def _pdb_of(r: ResultRecord) -> Path | None:
         if not r.artifacts:
             return None
@@ -537,7 +553,6 @@ def _resolve_parent_artifact(
     return (best[1], best[2]) if best is not None else None
 
 
-
 def _exec_boltzgen_async(
     cand: ActionCandidate,
     out_dir: Path,
@@ -549,11 +564,8 @@ def _exec_boltzgen_async(
     gpu_id: str,
     runtime_paths: RuntimePaths | None = None,
 ) -> tuple["subprocess.Popen | None", Path]:
-    """P2-B: BoltzGen de novo binder design. Self-evaluates with refolding
-    + iptm scoring; parser emits ResultRecords with BoltzGen-native metrics
-    as DIAGNOSTIC (not strict_success path). The LLM can chain a BoltzGen
-    hit with `structure_refilter` (AF2) in a later tick to get
-    T-ReX-calibrated pLDDT/iPAE/scRMSD.
+    """Launch BoltzGen and return its diagnostic outputs for parsing and standardized
+    evaluation.
     """
     paths = runtime_paths or RUNTIME_PATHS
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -594,7 +606,7 @@ def _exec_boltzgen_async(
         stderr=subprocess.STDOUT,
         **_popen_kwargs(),
     )
-    log_fp.close()  # §22.8.5: FD leak fix
+    log_fp.close()
     return proc, launch.output_dir
 
 
@@ -606,21 +618,15 @@ def _exec_proteinmpnn_async(
     binder_chain: str = "B",
     runtime_paths: RuntimePaths | None = None,
 ) -> tuple["subprocess.Popen | None", Path]:
-    """P2-D: ProteinMPNN sequence redesign on a parent binder PDB.
+    """Launch ProteinMPNN sequence redesign.
 
-    Output: FASTA file(s) at ``out_dir/seqs/*.fa``. The sequences are NOT
-    folded by MPNN itself — the controller chains MPNN with canonical AF2
-    score conversion in a later tick to score the new sequences. The parser
-    emits one ResultRecord per sequence with metrics
-    intentionally empty (only sequence + fa_path in artifacts).
+    The parser threads sequences onto the parent structure; downstream AF2 evaluation
+    supplies qualification measurements.
     """
     paths = runtime_paths or RUNTIME_PATHS
     out_dir.mkdir(parents=True, exist_ok=True)
     proteinmpnn_directory = paths.proteinmpnn_dir
-    if (
-        not proteinmpnn_directory.exists()
-        or not paths.proteinmpnn_weights.exists()
-    ):
+    if not proteinmpnn_directory.exists() or not paths.proteinmpnn_weights.exists():
         print(f"  [SKIP] ProteinMPNN scripts/weights missing", flush=True)
         return None, out_dir
     if not paths.complexa_python.exists() or not parent_pdb.exists():
@@ -653,7 +659,7 @@ def _exec_proteinmpnn_async(
         stderr=subprocess.STDOUT,
         **_popen_kwargs(),
     )
-    log_fp.close()  # §22.8.5: FD leak fix
+    log_fp.close()
     return proc, launch.output_dir
 
 
@@ -668,11 +674,7 @@ def _exec_bindcraft(
     gpu_id: str = "1",
     runtime_paths: RuntimePaths | None = None,
 ) -> tuple[int, Path]:
-    """Launch BindCraft as a child process. Returns (exit_code, output_dir).
-
-    T-001 throughput fix (2026-05-26): accepts ``gpu_id`` for parallel
-    multi-GPU dispatch. Caller chooses which worker GPU to pin to.
-    """
+    """Run BindCraft on the selected GPU and return (exit_code, output_dir)."""
     paths = runtime_paths or RUNTIME_PATHS
     bindcraft_repository = paths.bindcraft_repo
     bindcraft_environment = paths.bindcraft_env
@@ -689,24 +691,17 @@ def _exec_bindcraft(
     )
     if launch.advanced_overrides:
         print(
-            f"  [worker:bindcraft] advanced overrides: "
-            f"{launch.advanced_overrides}",
+            f"  [worker:bindcraft] advanced overrides: " f"{launch.advanced_overrides}",
             flush=True,
         )
     command = list(launch.argv)
     worker_environment = os.environ.copy()
-    worker_environment["PATH"] = (
-        f"{bindcraft_environment}/bin:"
-        + worker_environment.get("PATH", "")
-    )
-    worker_environment["LD_LIBRARY_PATH"] = (
-        f"{bindcraft_environment}/lib:"
-        + worker_environment.get("LD_LIBRARY_PATH", "")
-    )
-    # T-001 throughput fix (2026-05-26): pin worker to the caller-supplied
-    # GPU. The earlier hardcoded "1" wasted 2 of 3 worker GPUs (used GPU 1
-    # only; GPUs 2-3 idle). Now the controller round-robins across GPUs
-    # 1/2/3 and dispatches up to N concurrent workers via subprocess.Popen.
+    worker_environment[
+        "PATH"
+    ] = f"{bindcraft_environment}/bin:" + worker_environment.get("PATH", "")
+    worker_environment[
+        "LD_LIBRARY_PATH"
+    ] = f"{bindcraft_environment}/lib:" + worker_environment.get("LD_LIBRARY_PATH", "")
     worker_environment["CUDA_VISIBLE_DEVICES"] = gpu_id
 
     print(
@@ -729,9 +724,7 @@ def _exec_bindcraft_async(
     gpu_id: str,
     runtime_paths: RuntimePaths | None = None,
 ) -> tuple["subprocess.Popen", Path]:
-    """T-001: same as _exec_bindcraft but returns the Popen handle for
-    concurrent supervision instead of blocking on the subprocess. Caller
-    waits and then parses out_dir."""
+    """Launch BindCraft asynchronously and return the process handle and output directory."""
     paths = runtime_paths or RUNTIME_PATHS
     bindcraft_repository = paths.bindcraft_repo
     bindcraft_environment = paths.bindcraft_env
@@ -747,9 +740,8 @@ def _exec_bindcraft_async(
         config_delta=cand.config_delta,
     )
     command = list(launch.argv)
-    # §22.8.12: isolated env strips cluster CUDA (foldseek module load
-    # brings cudatoolkit/12.8 which would override BindCraft's bundled
-    # CUDA, causing SIGSEGV at "Stage 1: Test Logits" in worker.log).
+    # Isolate the backend CUDA libraries from cluster modules to avoid incompatible
+    # library loading.
     worker_environment = _isolated_env_for_subprocess(bindcraft_environment)
     worker_environment["CUDA_VISIBLE_DEVICES"] = gpu_id
     log_path = out_dir / "worker.log"
@@ -762,7 +754,7 @@ def _exec_bindcraft_async(
         stderr=subprocess.STDOUT,
         **_popen_kwargs(),
     )
-    log_fp.close()  # §22.8.5: FD leak fix
+    log_fp.close()
     return proc, out_dir
 
 
@@ -774,13 +766,9 @@ def _exec_complexa(
     gpu_id: str = "1",
     runtime_paths: RuntimePaths | None = None,
 ) -> tuple[int, Path]:
-    """Launch Complexa generate as a child process.
+    """Run Complexa in the configured environment and return (exit_code, output_dir).
 
-    NOTE: On Princeton della cluster the Complexa conda env is not installed
-    (only on MIT ORCD per CLAUDE.md). This function will return non-zero with
-    a clear error if pc_env doesn't exist — the caller logs as parse-skip and
-    T-ReX learns through evidence (no Complexa successes appearing in archive →
-    LLM naturally pivots to bindcraft).
+    Return exit code 127 when the configured Python executable is unavailable.
     """
     paths = runtime_paths or RUNTIME_PATHS
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -815,7 +803,6 @@ def _exec_complexa(
         f"bash_cmd[:200]: {shell_command[:200]}...",
         flush=True,
     )
-    # T-001 throughput fix (2026-05-26): pin worker to caller-supplied GPU.
     worker_environment = os.environ.copy()
     worker_environment["CUDA_VISIBLE_DEVICES"] = gpu_id
     return_code = subprocess.run(
@@ -851,12 +838,11 @@ def _exec_complexa_async(
     run_name: str,
     gpu_id: str,
     runtime_paths: RuntimePaths | None = None,
+    output_namespace: str | None = None,
 ) -> tuple["subprocess.Popen | None", Path]:
-    """T-001: async variant of _exec_complexa. Returns Popen handle that the
-    caller `.wait()` on. The Complexa output path is computed eagerly from
-    run_name (B-008 guarantees unique full candidate_id per launch). If
-    Complexa python or weights are missing, returns (None, out_dir) — caller
-    treats as rc=127 skip-parse."""
+    """Launch Complexa asynchronously with a candidate-specific output directory. Return
+    (None, out_dir) when the executable or weights are unavailable.
+    """
     paths = runtime_paths or RUNTIME_PATHS
     out_dir.mkdir(parents=True, exist_ok=True)
     complexa_repository = paths.complexa_repo
@@ -864,14 +850,18 @@ def _exec_complexa_async(
     if not complexa_python.exists():
         print(f"  [SKIP] Complexa python missing", flush=True)
         return None, out_dir
+    physical_run_name = (
+        f"{run_name}_a{output_namespace}" if output_namespace else run_name
+    )
     overrides = build_complexa_overrides(
         family=cand.method_family,
         candidate_id=cand.candidate_id,
         config_delta=cand.config_delta,
         target_id=target_id,
-        run_name=run_name,
+        run_name=physical_run_name,
         repo=complexa_repository,
         campaign_seed=RUN_SEED,
+        seed_run_name=run_name,
     )
     shell_command = build_complexa_shell_command(
         repo=complexa_repository,
@@ -882,7 +872,10 @@ def _exec_complexa_async(
     worker_environment["CUDA_VISIBLE_DEVICES"] = gpu_id
     log_path = out_dir / "worker.log"
     log_fp = open(log_path, "w")
-    print(f"  [worker:{cand.method_family}][gpu={gpu_id}] launching → {run_name}", flush=True)
+    print(
+        f"  [worker:{cand.method_family}][gpu={gpu_id}] launching → {physical_run_name}",
+        flush=True,
+    )
     proc = subprocess.Popen(
         ["bash", "-c", shell_command],
         env=worker_environment,
@@ -890,11 +883,11 @@ def _exec_complexa_async(
         stderr=subprocess.STDOUT,
         **_popen_kwargs(),
     )
-    log_fp.close()  # §22.8.5: FD leak fix
+    log_fp.close()
     inference_directory = complexa_repository / "inference"
     complexa_output_directory = (
         inference_directory
-        / f"search_binder_local_pipeline_{target_id}_{run_name}"
+        / f"search_binder_local_pipeline_{target_id}_{physical_run_name}"
     )
     return proc, complexa_output_directory
 
@@ -902,9 +895,6 @@ def _exec_complexa_async(
 # Controller main loop
 # -----------------------------------------------------------------------------
 
-# `_execute_and_parse` (sync path) deleted 2026-05-26 PM. The async
-# dispatcher in `main()` (handles list + per-batch waits) is the sole
-# execution path. The sync version had drifted from the async dispatcher and was
 
 def _bindcraft_accepted_count(out_dir) -> int | None:
     """Number of ACCEPTED BindCraft designs so far (rows in
@@ -922,6 +912,7 @@ def _bindcraft_accepted_count(out_dir) -> int | None:
         return None
     try:
         from pathlib import Path as _P
+
         d = _P(out_dir)
         csv = next(d.glob("**/final_design_stats.csv"), None)
         if csv is not None and csv.exists():
@@ -939,7 +930,7 @@ def _bindcraft_accepted_count(out_dir) -> int | None:
 def _bindcraft_scoreable_final_count(out_dir) -> int | None:
     """Number of final BindCraft PDBs eligible for canonical AF2 scoring.
 
-    BindCraft's native Accepted/Rejected split is not the T-ReX strict gate.
+    BindCraft's native Accepted/Rejected split is not the T-REX strict gate.
     Both final directories contain complete binder candidates and live archives
     show canonical strict successes from both. Trajectory/MPNN intermediates are
     deliberately excluded because they are not final score-conversion inputs.
@@ -961,10 +952,8 @@ def _bindcraft_scoreable_final_count(out_dir) -> int | None:
     except Exception:  # noqa: BLE001
         return None
     # Some BindCraft layouts write final_design_stats.csv before materializing
-    # Accepted/. Preserve the historical accepted-row fallback in that case.
+    # Accepted/. Use the accepted-row count when final structures are absent.
     return _bindcraft_accepted_count(out_dir)
-
-
 
 
 def _csv_body_row_count(path: Path) -> int | None:
@@ -979,13 +968,10 @@ def _csv_body_row_count(path: Path) -> int | None:
 
 
 def _bindcraft_progress_count(out_dir) -> int | None:
-    """Monotone-ish BindCraft artifact signature for debug/provenance.
+    """Summarize BindCraft artifacts for provenance and diagnostics.
 
-    This is intentionally NOT the timeout productivity signal. Trajectory/MPNN
-    rows can grow for hours while no scoreable accepted/final designs appear,
-    which self-locks the high-cost cap and delays official AF2 feedback. The
-    watchdog uses accepted/final designs; this helper is retained only for
-    provenance and future diagnostics.
+    Intermediate trajectory and MPNN rows do not establish scoreable output.
+    The timeout watchdog uses accepted/final designs, not this signature.
     """
     if out_dir is None:
         return None
@@ -995,7 +981,11 @@ def _bindcraft_progress_count(out_dir) -> int | None:
         acc = _bindcraft_accepted_count(d)
         if acc is not None:
             counts.append(acc)
-        for name in ("trajectory_stats.csv", "mpnn_design_stats.csv", "final_design_stats.csv"):
+        for name in (
+            "trajectory_stats.csv",
+            "mpnn_design_stats.csv",
+            "final_design_stats.csv",
+        ):
             for csv in d.glob(f"**/{name}"):
                 n = _csv_body_row_count(csv)
                 if n is not None:
@@ -1020,22 +1010,22 @@ def _bindcraft_progress_count(out_dir) -> int | None:
 
 
 LENGTHS_PER_TARGET: dict[str, tuple[int, int]] = {
-    "05_CD45":     (80, 200),
-    "23_BetV1":    (70, 185),
-    "30_SC2RBD":   (80, 120),
+    "05_CD45": (80, 200),
+    "23_BetV1": (70, 185),
+    "30_SC2RBD": (80, 120),
     # Official Proteina-Complexa Table 4 target variants.
-    "28_HER2_AAV":          (60, 100),
-    "26_CbAgo":             (70, 160),
-    "31_IL7RA":             (50, 120),
+    "28_HER2_AAV": (60, 100),
+    "26_CbAgo": (70, 160),
+    "31_IL7RA": (50, 120),
     "32_PDL1_ALPHA_REPACK": (50, 120),
-    "33_TrkA":              (50, 120),
-    "36_VEGFA":              (50, 140),
-    "38_TNFalpha_REPACK":   (50, 120),
+    "33_TrkA": (50, 120),
+    "36_VEGFA": (50, 140),
+    "38_TNFalpha_REPACK": (50, 120),
     # Historical aliases kept for replay/offline analysis only.
-    "27_HER2_AAV":          (60, 100),
-    "25_CbAgo":             (70, 160),
-    "02_PDL1":              (64, 155),
-    "38_TNFalpha":          (50, 120),
+    "27_HER2_AAV": (60, 100),
+    "25_CbAgo": (70, 160),
+    "02_PDL1": (64, 155),
+    "38_TNFalpha": (50, 120),
 }
 
 
@@ -1047,7 +1037,9 @@ def _high_cost_pending_families() -> set[str]:
     return {f.strip() for f in raw.split(",") if f.strip()}
 
 
-def _pending_family_load_summary(pool, pending: list[str], cand_by_id: dict[str, ActionCandidate]) -> dict[str, Any]:
+def _pending_family_load_summary(
+    pool, pending: list[str], cand_by_id: dict[str, ActionCandidate]
+) -> dict[str, Any]:
     """Family-level load from running + queued event-driven work.
 
     Completed-result health cannot see slow workers until they finish. This
@@ -1101,7 +1093,9 @@ def _pending_load_cache_key(load: dict[str, Any]) -> tuple[tuple[str, int, int],
     for fam, row in sorted(rows.items()):
         if not isinstance(row, dict):
             continue
-        out.append((fam, int(row.get("running", 0) or 0), int(row.get("queued", 0) or 0)))
+        out.append(
+            (fam, int(row.get("running", 0) or 0), int(row.get("queued", 0) or 0))
+        )
     return tuple(out)
 
 
@@ -1121,7 +1115,9 @@ def _mh_get(h: Any, key: str, default: Any = 0) -> Any:
     return getattr(h, key, default)
 
 
-def _repeated_support_dispatch_cap(evidence: EvidenceSummary | None, family: str) -> int | None:
+def _repeated_support_dispatch_cap(
+    evidence: EvidenceSummary | None, family: str
+) -> int | None:
     if evidence is None:
         return None
     er = getattr(evidence, "execution_realization", {}) or {}
@@ -1136,12 +1132,16 @@ def _repeated_support_dispatch_cap(evidence: EvidenceSummary | None, family: str
         selected_not_started = int(row.get("selected_not_started", 0) or 0)
     except (TypeError, ValueError):
         return None
-    min_proposed = _bounded_int_env("TREX_HIGH_COST_REPEATED_SUPPORT_MIN_PROPOSED", 6, min_value=1)
+    min_proposed = _bounded_int_env(
+        "TREX_HIGH_COST_REPEATED_SUPPORT_MIN_PROPOSED", 6, min_value=1
+    )
     if proposed < min_proposed:
         return None
     if deferred <= 0 and selected_not_started <= 0:
         return None
-    max_started_fraction = float(os.environ.get("TREX_HIGH_COST_REPEATED_SUPPORT_MAX_STARTED_FRACTION", "0.35"))
+    max_started_fraction = float(
+        os.environ.get("TREX_HIGH_COST_REPEATED_SUPPORT_MAX_STARTED_FRACTION", "0.35")
+    )
     if started / max(1, proposed) > max_started_fraction:
         return None
     state = str(getattr(evidence, "state_label", "") or "")
@@ -1156,7 +1156,8 @@ def _repeated_support_dispatch_cap(evidence: EvidenceSummary | None, family: str
         and dry_gpu_h >= 1.0
     )
     if (
-        state not in {"low_evidence", "stalled", "deep_stall", "strict_duplicate_collapse"}
+        state
+        not in {"low_evidence", "stalled", "deep_stall", "strict_duplicate_collapse"}
         and run_su >= 4
         and not productive_duplicate_dry_collapse
     ):
@@ -1168,11 +1169,24 @@ def _repeated_support_dispatch_cap(evidence: EvidenceSummary | None, family: str
     chained = int(_mh_get(mh, "chained_strict_yield_su", 0) or 0)
     near = int(_mh_get(mh, "near_miss_yield", 0) or 0)
     recent_near = int(_mh_get(mh, "near_miss_yield_recent", 0) or 0)
-    max_negative_gpu_h = float(os.environ.get("TREX_HIGH_COST_REPEATED_SUPPORT_MAX_NEGATIVE_GPU_H", "6.0"))
-    max_timeouts = _bounded_int_env("TREX_HIGH_COST_REPEATED_SUPPORT_MAX_TIMEOUTS", 1, min_value=0)
-    if gpu_h >= max_negative_gpu_h and timeouts > max_timeouts and strict == 0 and chained == 0 and near == 0 and recent_near == 0:
+    max_negative_gpu_h = float(
+        os.environ.get("TREX_HIGH_COST_REPEATED_SUPPORT_MAX_NEGATIVE_GPU_H", "6.0")
+    )
+    max_timeouts = _bounded_int_env(
+        "TREX_HIGH_COST_REPEATED_SUPPORT_MAX_TIMEOUTS", 1, min_value=0
+    )
+    if (
+        gpu_h >= max_negative_gpu_h
+        and timeouts > max_timeouts
+        and strict == 0
+        and chained == 0
+        and near == 0
+        and recent_near == 0
+    ):
         return None
-    return _bounded_int_env("TREX_HIGH_COST_INFLIGHT_CAP_REPEATED_SUPPORT", 2, min_value=1)
+    return _bounded_int_env(
+        "TREX_HIGH_COST_INFLIGHT_CAP_REPEATED_SUPPORT", 2, min_value=1
+    )
 
 
 def _high_cost_dispatch_cap(evidence: EvidenceSummary | None, family: str) -> int:
@@ -1192,25 +1206,59 @@ def _high_cost_dispatch_cap(evidence: EvidenceSummary | None, family: str) -> in
     cap, _source = high_cost_cap_for_evidence(
         evidence,
         family,
-        high_cost_pending_cap=_bounded_int_env("TREX_HIGH_COST_INFLIGHT_CAP", 1, min_value=1),
-        high_cost_pending_promoted_cap=_bounded_int_env("TREX_HIGH_COST_INFLIGHT_CAP_PROMOTED", 2, min_value=1),
-        high_cost_pending_deep_stall_cap=_bounded_int_env("TREX_HIGH_COST_INFLIGHT_CAP_DEEP_STALL", 1, min_value=1),
-        high_cost_pending_dry_pivot_cap=_bounded_int_env("TREX_HIGH_COST_INFLIGHT_CAP_DRY_PIVOT", 2, min_value=1),
-        high_cost_pending_strong_cap=_bounded_int_env("TREX_HIGH_COST_INFLIGHT_CAP_STRONG", 2, min_value=1, max_value=3),
-        high_cost_dry_pivot_min_gpu_h=_float_env("TREX_HIGH_COST_DRY_PIVOT_MIN_GPU_H", 0.75),
-        high_cost_dry_pivot_min_completed_children=_bounded_int_env("TREX_HIGH_COST_DRY_PIVOT_MIN_COMPLETED", 32, min_value=1),
-        high_cost_dry_pivot_max_best_recent_su_per_gpu_h=_float_env("TREX_HIGH_COST_DRY_PIVOT_MAX_BEST_RECENT_SU_PER_GPU_H", 0.25),
-        high_cost_strong_min_su=_bounded_int_env("TREX_HIGH_COST_STRONG_MIN_SU", 2, min_value=1),
+        high_cost_pending_cap=_bounded_int_env(
+            "TREX_HIGH_COST_INFLIGHT_CAP", 1, min_value=1
+        ),
+        high_cost_pending_promoted_cap=_bounded_int_env(
+            "TREX_HIGH_COST_INFLIGHT_CAP_PROMOTED", 2, min_value=1
+        ),
+        high_cost_pending_deep_stall_cap=_bounded_int_env(
+            "TREX_HIGH_COST_INFLIGHT_CAP_DEEP_STALL", 1, min_value=1
+        ),
+        high_cost_pending_dry_pivot_cap=_bounded_int_env(
+            "TREX_HIGH_COST_INFLIGHT_CAP_DRY_PIVOT", 2, min_value=1
+        ),
+        high_cost_pending_strong_cap=_bounded_int_env(
+            "TREX_HIGH_COST_INFLIGHT_CAP_STRONG", 2, min_value=1, max_value=3
+        ),
+        high_cost_dry_pivot_min_gpu_h=_float_env(
+            "TREX_HIGH_COST_DRY_PIVOT_MIN_GPU_H", 0.75
+        ),
+        high_cost_dry_pivot_min_completed_children=_bounded_int_env(
+            "TREX_HIGH_COST_DRY_PIVOT_MIN_COMPLETED", 32, min_value=1
+        ),
+        high_cost_dry_pivot_max_best_recent_su_per_gpu_h=_float_env(
+            "TREX_HIGH_COST_DRY_PIVOT_MAX_BEST_RECENT_SU_PER_GPU_H", 0.25
+        ),
+        high_cost_strong_min_su=_bounded_int_env(
+            "TREX_HIGH_COST_STRONG_MIN_SU", 2, min_value=1
+        ),
         high_cost_strong_min_gpu_h=_float_env("TREX_HIGH_COST_STRONG_MIN_GPU_H", 1.0),
-        high_cost_strong_min_recent_su_per_gpu_h=_float_env("TREX_HIGH_COST_STRONG_MIN_RECENT_SU_PER_GPU_H", 0.50),
-        high_cost_strong_best_fraction=_float_env("TREX_HIGH_COST_STRONG_BEST_FRACTION", 0.80),
-        high_cost_stale_recent_gpu_h=_float_env("TREX_HIGH_COST_STALE_RECENT_GPU_H", 1.0),
+        high_cost_strong_min_recent_su_per_gpu_h=_float_env(
+            "TREX_HIGH_COST_STRONG_MIN_RECENT_SU_PER_GPU_H", 0.50
+        ),
+        high_cost_strong_best_fraction=_float_env(
+            "TREX_HIGH_COST_STRONG_BEST_FRACTION", 0.80
+        ),
+        high_cost_stale_recent_gpu_h=_float_env(
+            "TREX_HIGH_COST_STALE_RECENT_GPU_H", 1.0
+        ),
         min_su_per_gpu_h=_float_env("TREX_COST_AWARE_MIN_SU_PER_GPU_H", 0.25),
-        high_cost_repeated_support_min_proposed=_bounded_int_env("TREX_HIGH_COST_REPEATED_SUPPORT_MIN_PROPOSED", 6, min_value=1),
-        high_cost_repeated_support_max_started_fraction=_float_env("TREX_HIGH_COST_REPEATED_SUPPORT_MAX_STARTED_FRACTION", 0.35),
-        high_cost_repeated_support_cap=_bounded_int_env("TREX_HIGH_COST_INFLIGHT_CAP_REPEATED_SUPPORT", 2, min_value=1),
-        high_cost_repeated_support_max_negative_gpu_h=_float_env("TREX_HIGH_COST_REPEATED_SUPPORT_MAX_NEGATIVE_GPU_H", 6.0),
-        high_cost_repeated_support_max_timeouts=_bounded_int_env("TREX_HIGH_COST_REPEATED_SUPPORT_MAX_TIMEOUTS", 1, min_value=0),
+        high_cost_repeated_support_min_proposed=_bounded_int_env(
+            "TREX_HIGH_COST_REPEATED_SUPPORT_MIN_PROPOSED", 6, min_value=1
+        ),
+        high_cost_repeated_support_max_started_fraction=_float_env(
+            "TREX_HIGH_COST_REPEATED_SUPPORT_MAX_STARTED_FRACTION", 0.35
+        ),
+        high_cost_repeated_support_cap=_bounded_int_env(
+            "TREX_HIGH_COST_INFLIGHT_CAP_REPEATED_SUPPORT", 2, min_value=1
+        ),
+        high_cost_repeated_support_max_negative_gpu_h=_float_env(
+            "TREX_HIGH_COST_REPEATED_SUPPORT_MAX_NEGATIVE_GPU_H", 6.0
+        ),
+        high_cost_repeated_support_max_timeouts=_bounded_int_env(
+            "TREX_HIGH_COST_REPEATED_SUPPORT_MAX_TIMEOUTS", 1, min_value=0
+        ),
     )
     return cap
 
@@ -1236,28 +1284,41 @@ def _high_cost_dispatch_cap_for_pool(
     return max(1, min(cap, pool_n - reserve))
 
 
-def _high_cost_dispatch_defer_reason(pool, cand: ActionCandidate, archive) -> str | None:
+def _high_cost_dispatch_defer_reason(
+    pool, cand: ActionCandidate, archive
+) -> str | None:
     fam = str(getattr(cand, "method_family", "") or "")
     if not fam or archive is None or fam not in _high_cost_pending_families():
         return None
     evidence = _latest_evidence_for_dispatch(archive)
     cap = _high_cost_dispatch_cap_for_pool(evidence, fam, pool)
     active = sum(
-        1 for slot in pool
+        1
+        for slot in pool
         if getattr(slot, "busy", False)
         and slot.cand is not None
         and slot.cand.method_family == fam
     )
     if active >= cap:
-        state = str(getattr(evidence, "state_label", "unknown") or "unknown") if evidence else "no_evidence"
+        state = (
+            str(getattr(evidence, "state_label", "unknown") or "unknown")
+            if evidence
+            else "no_evidence"
+        )
         return f"high_cost_inflight_cap:{fam}:active={active} cap={cap} state={state}"
     return None
 
 
 def _dispatch_candidate_to_gpu(
-    cand: "ActionCandidate", *, gpu_id: str, archive: "Archive",
-    target: "TargetConstraint", target_pdb: str, round_id: int,
-    archive_root: Path, runtime_paths: RuntimePaths | None = None,
+    cand: "ActionCandidate",
+    *,
+    gpu_id: str,
+    archive: "Archive",
+    target: "TargetConstraint",
+    target_pdb: str,
+    round_id: int,
+    archive_root: Path,
+    runtime_paths: RuntimePaths | None = None,
 ) -> tuple[object, Path, str, str, str, str] | None:
     """Family-aware worker dispatch for one candidate.
 
@@ -1279,16 +1340,31 @@ def _dispatch_candidate_to_gpu(
 
     if cand.method_family == "bindcraft":
         proc, out_dir = _exec_bindcraft_async(
-            cand, worker_out, target.target_id, target_pdb,
-            ",".join(target.hotspots), _csv_chains(tuple(target.chain_ids)),
-            lengths, gpu_id=gpu_id, runtime_paths=paths,
+            cand,
+            worker_out,
+            target.target_id,
+            target_pdb,
+            ",".join(target.hotspots),
+            _csv_chains(tuple(target.chain_ids)),
+            lengths,
+            gpu_id=gpu_id,
+            runtime_paths=paths,
         )
     elif cand.method_family.startswith("complexa_"):
         cid_safe = cand.candidate_id.replace("/", "_")
         run_name = f"v7_r{round_id:03d}_{cid_safe}"
+        namespace_material = (
+            f"{Path(archive_root).resolve()}|{os.getpid()}|{time.time_ns()}"
+        )
+        output_namespace = hashlib.sha256(namespace_material.encode()).hexdigest()[:12]
         proc, out_dir = _exec_complexa_async(
-            cand, worker_out, target.target_id, run_name, gpu_id=gpu_id,
+            cand,
+            worker_out,
+            target.target_id,
+            run_name,
+            gpu_id=gpu_id,
             runtime_paths=paths,
+            output_namespace=output_namespace,
         )
         if proc is None:
             print(f"  [SKIP] {cand.method_family}", flush=True)
@@ -1300,8 +1376,11 @@ def _dispatch_candidate_to_gpu(
             return None
         parent_pdb, parent_result_id = parent
         parent_pdb_str = str(parent_pdb)
-        # §22.8.2: PDB-introspected chain IDs (defaults A/B).
-        tgt_ch, bnd_ch = _resolve_pdb_chains(parent_pdb, target_chain_ids=tuple(target.chain_ids))
+        tgt_ch, bnd_ch = _resolve_pdb_chains(
+            parent_pdb,
+            target_chain_ids=tuple(target.chain_ids),
+            target_pdb=Path(target_pdb),
+        )
         target_chains_csv, binder_chain = tgt_ch, bnd_ch
         if (tgt_ch, bnd_ch) != ("A", "B"):
             print(
@@ -1320,8 +1399,12 @@ def _dispatch_candidate_to_gpu(
                 print(f"  [SKIP] {reason}", flush=True)
                 raise PermanentDispatchSkip(reason)
         proc, out_dir = _exec_af2_refilter_async(
-            cand, worker_out, parent_pdb,
-            target_chain=tgt_ch, binder_chain=bnd_ch, gpu_id=gpu_id,
+            cand,
+            worker_out,
+            parent_pdb,
+            target_chain=tgt_ch,
+            binder_chain=bnd_ch,
+            gpu_id=gpu_id,
             runtime_paths=paths,
         )
         if proc is None:
@@ -1333,10 +1416,18 @@ def _dispatch_candidate_to_gpu(
             return None
         parent_pdb, parent_result_id = parent
         parent_pdb_str = str(parent_pdb)
-        tgt_ch, bnd_ch = _resolve_pdb_chains(parent_pdb, target_chain_ids=tuple(target.chain_ids))
+        tgt_ch, bnd_ch = _resolve_pdb_chains(
+            parent_pdb,
+            target_chain_ids=tuple(target.chain_ids),
+            target_pdb=Path(target_pdb),
+        )
         target_chains_csv, binder_chain = tgt_ch, bnd_ch
         proc, out_dir = _exec_proteinmpnn_async(
-            cand, worker_out, parent_pdb, gpu_id=gpu_id, binder_chain=bnd_ch,
+            cand,
+            worker_out,
+            parent_pdb,
+            gpu_id=gpu_id,
+            binder_chain=bnd_ch,
             runtime_paths=paths,
         )
         if proc is None:
@@ -1344,9 +1435,15 @@ def _dispatch_candidate_to_gpu(
     elif cand.method_family == "boltzgen":
         binder_chain = _first_free_chain_id(tuple(target.chain_ids), default="B")
         proc, out_dir = _exec_boltzgen_async(
-            cand, worker_out, target.target_id, target_pdb,
-            list(target.hotspots), list(target.chain_ids),
-            lengths, gpu_id=gpu_id, runtime_paths=paths,
+            cand,
+            worker_out,
+            target.target_id,
+            target_pdb,
+            list(target.hotspots),
+            list(target.chain_ids),
+            lengths,
+            gpu_id=gpu_id,
+            runtime_paths=paths,
         )
         if proc is None:
             return None
@@ -1367,7 +1464,9 @@ def _dispatch_candidate_to_gpu(
             parent_pdb, parent_result_id = parent
             parent_pdb_str = str(parent_pdb)
             target_chains_csv, binder_chain = _resolve_pdb_chains(
-                parent_pdb, target_chain_ids=tuple(target.chain_ids)
+                parent_pdb,
+                target_chain_ids=tuple(target.chain_ids),
+                target_pdb=Path(target_pdb),
             )
         else:
             binder_chain = _first_free_chain_id(tuple(target.chain_ids), default="B")
@@ -1383,9 +1482,7 @@ def _dispatch_candidate_to_gpu(
             target_chains_csv=target_chains_csv,
             binder_chain=binder_chain,
         )
-        command = validate_backend_command(
-            adapter.build_command(context), worker_out
-        )
+        command = validate_backend_command(adapter.build_command(context), worker_out)
         command.output_dir.mkdir(parents=True, exist_ok=True)
         worker_out.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
@@ -1411,7 +1508,14 @@ def _dispatch_candidate_to_gpu(
             f"  [worker:{cand.method_family}][gpu={gpu_id}] launching extension",
             flush=True,
         )
-    return proc, out_dir, parent_pdb_str, parent_result_id, target_chains_csv, binder_chain
+    return (
+        proc,
+        out_dir,
+        parent_pdb_str,
+        parent_result_id,
+        target_chains_csv,
+        binder_chain,
+    )
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -1426,7 +1530,7 @@ def _float_or_none(value: Any) -> float | None:
 def _complexa_native_refilter_score(r: ResultRecord) -> float | None:
     """Rank Complexa parents for canonical AF2 score-conversion.
 
-    Legacy helper for ranking old Complexa diagnostic archives. New T-ReX
+    Legacy helper for ranking old Complexa diagnostic archives. New T-REX
     Complexa launches are direct-scored and should not enter score conversion.
     The score is ranking-only for stale chain candidates or offline replay.
     """
@@ -1449,19 +1553,25 @@ def _complexa_native_refilter_score(r: ResultRecord) -> float | None:
         score += max(0.0, (4.0 - rmsd) / 4.0)
         seen = True
     if (
-        plddt is not None and plddt >= 90.0
-        and ipae is not None and ipae <= (7.0 / 31.0)
-        and rmsd is not None and rmsd < 1.5
+        plddt is not None
+        and plddt >= 90.0
+        and ipae is not None
+        and ipae <= (7.0 / 31.0)
+        and rmsd is not None
+        and rmsd < 1.5
     ):
         score += 10.0
 
-    # 2026-06-18 (LOW cleanup): the calibrated pLDDT/iPAE/scRMSD core (each ~[0,1])
-    # plus the +10 strict-like bonus should DOMINATE this ranking. The heterogeneous
-    # diagnostic add-ons below (ipTM∈[0,1], ipsae, raw contact densities which can be
-    # >>1) are down-weighted to a tiebreak so a high-contact-but-failing-interface
-    # parent cannot jump ahead of a near-strict one in the refilter queue.
+    # Use auxiliary diagnostics only as tiebreakers so their different scales cannot
+    # overwhelm the qualification-based ranking.
     _ADDON_W = 0.25
-    for key in ("ipTM", "avg_ipsae", "max_ipsae", "contact_density", "interface_contact_density"):
+    for key in (
+        "ipTM",
+        "avg_ipsae",
+        "max_ipsae",
+        "contact_density",
+        "interface_contact_density",
+    ):
         value = _float_or_none(m.get(key))
         if value is not None:
             score += _ADDON_W * value
@@ -1549,7 +1659,9 @@ def _proteinmpnn_refilter_proxy_score(r: ResultRecord) -> float | None:
     return score
 
 
-def _diagnostic_refilter_score(r: ResultRecord, evidence: EvidenceSummary | None = None) -> float:
+def _diagnostic_refilter_score(
+    r: ResultRecord, evidence: EvidenceSummary | None = None
+) -> float:
     """Higher-is-better parent ranking for diagnostic to canonical refilter."""
     route_modifier = _route_value_score_modifier(r.backend_family, evidence)
 
@@ -1563,9 +1675,7 @@ def _diagnostic_refilter_score(r: ResultRecord, evidence: EvidenceSummary | None
             return score + route_modifier
 
     bins = r.bins or {}
-    for key in (
-        "bindcraft_rank_iptm",
-    ):
+    for key in ("bindcraft_rank_iptm",):
         value = _float_or_none(bins.get(key))
         if value is not None:
             return value + route_modifier
@@ -1604,12 +1714,20 @@ def _route_key_for_launch_candidate(
             actions = list(archive.iter_records(ActionCandidate))
             spawning_actions = _spawn_index_for_results(actions, results)
             root = resolve_generating_record(
-                parent, by_result_id=by_result_id, spawning_actions=spawning_actions,
+                parent,
+                by_result_id=by_result_id,
+                spawning_actions=spawning_actions,
             )
             root_action = spawning_actions.get(root.result_id)
             root_family = root.backend_family
-            root_op = root_action.operator_id if root_action is not None else f"{root_family}_default"
-            root_cfg = dict((root_action.config_delta or {}) if root_action is not None else {})
+            root_op = (
+                root_action.operator_id
+                if root_action is not None
+                else f"{root_family}_default"
+            )
+            root_cfg = dict(
+                (root_action.config_delta or {}) if root_action is not None else {}
+            )
             root_comp = route_component_key(root_family, root_op, root_cfg)
 
     return (
@@ -1634,13 +1752,19 @@ def _exact_route_signal_for_launch(
     if source_candidate is None:
         return {}
     try:
-        strategy_key = _route_key_for_launch_candidate(archive, family, source_candidate)
+        strategy_key = _route_key_for_launch_candidate(
+            archive, family, source_candidate
+        )
         evs = list(archive.iter_records(EvidenceSummary))[-6:]
     except Exception:  # noqa: BLE001
         return {}
     for ev in reversed(evs):
         for row in getattr(ev, "route_values", None) or []:
-            get = row.get if isinstance(row, dict) else lambda k, d=None: getattr(row, k, d)
+            get = (
+                row.get
+                if isinstance(row, dict)
+                else lambda k, d=None: getattr(row, k, d)
+            )
             if get("scope") != "route":
                 continue
             if str(get("strategy_key", "") or "") != strategy_key:
@@ -1648,15 +1772,22 @@ def _exact_route_signal_for_launch(
             return {
                 "strategy_key": strategy_key,
                 "status": str(get("status", "") or ""),
-                "record_recent_new_su": int(get("record_recent_new_su", get("new_su_recent", 0)) or 0),
+                "record_recent_new_su": int(
+                    get("record_recent_new_su", get("new_su_recent", 0)) or 0
+                ),
                 "record_recent_rate": _route_row_current_rate(row),
                 "rate": float(get("new_su_per_route_gpu_h", 0.0) or 0.0),
             }
     return {"strategy_key": strategy_key}
 
 
-
-def _bounded_int_env(name: str, default: int, *, min_value: int | None = None, max_value: int | None = None) -> int:
+def _bounded_int_env(
+    name: str,
+    default: int,
+    *,
+    min_value: int | None = None,
+    max_value: int | None = None,
+) -> int:
     """Parse an integer env override without letting bad env crash the controller."""
     raw = os.environ.get(name)
     if raw is None or raw == "":
@@ -1673,8 +1804,6 @@ def _bounded_int_env(name: str, default: int, *, min_value: int | None = None, m
     return value
 
 
-
-
 # Compatibility aliases for tests and downstream code that imported the former
 # controller-private helpers. New code should use trex.execution directly.
 _score_conversion_identity = score_conversion_parent_identity
@@ -1683,6 +1812,7 @@ _record_has_canonical_strict_axes = canonical_strict_metrics_present
 _record_needs_score_conversion = result_requires_score_conversion
 _records_need_score_conversion = results_require_score_conversion
 _is_canonical_score_conversion_record = is_canonical_score_conversion_result
+
 
 def _auto_chain_cap_for_diagnostic_launch(
     archive: Archive,
@@ -1714,11 +1844,11 @@ def _chain_fair_probe_per_route() -> int:
     already says that route is buying new SU or has native-strict-like parents.
     """
     try:
-        return max(1, int(os.environ.get("TREX_CHAIN_REFILTER_FAIR_PROBE_PER_ROUTE", "4")))
+        return max(
+            1, int(os.environ.get("TREX_CHAIN_REFILTER_FAIR_PROBE_PER_ROUTE", "4"))
+        )
     except ValueError:
         return 4
-
-
 
 
 def _chain_weak_family_probe_cap() -> int:
@@ -1730,7 +1860,9 @@ def _chain_weak_family_probe_cap() -> int:
     enough failed score-conversion feedback exists.
     """
     try:
-        return max(1, int(os.environ.get("TREX_CHAIN_REFILTER_WEAK_FAMILY_PROBE_CAP", "24")))
+        return max(
+            1, int(os.environ.get("TREX_CHAIN_REFILTER_WEAK_FAMILY_PROBE_CAP", "24"))
+        )
     except ValueError:
         return 24
 
@@ -1744,7 +1876,9 @@ def _chain_family_score_conversion_tick_cap() -> int:
     evidence can still bypass it through the high-value cap below.
     """
     try:
-        return max(1, int(os.environ.get("TREX_CHAIN_REFILTER_FAMILY_PER_TICK_CAP", "4")))
+        return max(
+            1, int(os.environ.get("TREX_CHAIN_REFILTER_FAMILY_PER_TICK_CAP", "4"))
+        )
     except ValueError:
         return 4
 
@@ -1754,7 +1888,11 @@ def _chain_family_score_conversion_high_value_tick_cap() -> int:
     try:
         return max(
             1,
-            int(os.environ.get("TREX_CHAIN_REFILTER_FAMILY_PER_TICK_HIGH_VALUE_CAP", "16")),
+            int(
+                os.environ.get(
+                    "TREX_CHAIN_REFILTER_FAMILY_PER_TICK_HIGH_VALUE_CAP", "16"
+                )
+            ),
         )
     except ValueError:
         return 16
@@ -1813,9 +1951,7 @@ def _chain_route_tranche_cap(
     current_idx = tranches.index(observed) if observed in tranches else None
 
     previous_observed = int(
-        _route_row_value(
-            prior_route_row, "canonical_score_conversion_count", 0
-        ) or 0
+        _route_row_value(prior_route_row, "canonical_score_conversion_count", 0) or 0
     )
     if previous_observed >= observed:
         return observed
@@ -1867,17 +2003,16 @@ def _is_recoverable_dispatch_failure(d: DispatchRecord) -> bool:
 
 
 def _fallback_chain_source_family(candidate_id: str) -> str:
-    """Best-effort source-family parser for legacy/synthetic chain ids.
+    """Infer a source family from an archived or synthetic chain identifier.
 
-    Live scheduling should use the parent ResultRecord, not this string parser.
-    The fallback exists for old archives and unit fixtures. Unlike the previous
-    split("_", 2) parser, this preserves underscore-heavy families such as
-    unsupported legacy Complexa aliases.
+    Live scheduling uses the parent ResultRecord. This fallback preserves
+    underscores within the family name and returns ``_unknown`` for an
+    unrecognized identifier.
     """
     if not candidate_id.startswith("chain_") or "_to_" not in candidate_id:
         return "_unknown"
     try:
-        left = candidate_id[len("chain_"):].split("_to_", 1)[0]
+        left = candidate_id[len("chain_") :].split("_to_", 1)[0]
         return left.split("_", 1)[1] if "_" in left else "_unknown"
     except Exception:  # noqa: BLE001
         return "_unknown"
@@ -1950,7 +2085,9 @@ def _route_row_allows_record_recent(row: Any) -> bool:
     routes must rely on GPU/medium windows or lifetime as explicitly labelled.
     """
     route_role = str(_route_row_value(row, "route_role", "") or "")
-    canonical_refilter_gpu_h = _route_row_float(row, "canonical_refilter_gpu_h", 0.0) or 0.0
+    canonical_refilter_gpu_h = (
+        _route_row_float(row, "canonical_refilter_gpu_h", 0.0) or 0.0
+    )
     return canonical_refilter_gpu_h <= 0.0 and "score_conversion" not in route_role
 
 
@@ -1962,7 +2099,9 @@ def _route_row_recent_su(row: Any) -> int:
     if _route_row_allows_record_recent(row):
         recent = max(
             recent,
-            _route_row_int(row, "record_recent_new_su", _route_row_value(row, "new_su_recent", 0)),
+            _route_row_int(
+                row, "record_recent_new_su", _route_row_value(row, "new_su_recent", 0)
+            ),
         )
     return recent
 
@@ -2035,6 +2174,7 @@ def _chain_source_context(
         if root_parent is not None:
             try:
                 from .evidence_reducer import resolve_generating_record
+
                 root = resolve_generating_record(
                     root_parent,
                     by_result_id=by_result_id,
@@ -2044,8 +2184,14 @@ def _chain_source_context(
                 root = root_parent
             root_action = spawning_actions.get(root.result_id)
             root_family = root.backend_family
-            root_op = root_action.operator_id if root_action is not None else f"{root_family}_default"
-            root_cfg = dict((root_action.config_delta or {}) if root_action is not None else {})
+            root_op = (
+                root_action.operator_id
+                if root_action is not None
+                else f"{root_family}_default"
+            )
+            root_cfg = dict(
+                (root_action.config_delta or {}) if root_action is not None else {}
+            )
             root_comp = route_component_key(root_family, root_op, root_cfg)
 
     route_key = (
@@ -2095,14 +2241,21 @@ def _chain_route_is_promoted(
             return True
         if _route_row_current_rate(row) > 0.0:
             return True
-        if status == "healthy" and int(_route_row_value(row, "near_miss_recent", 0) or 0) > 0:
+        if (
+            status == "healthy"
+            and int(_route_row_value(row, "near_miss_recent", 0) or 0) > 0
+        ):
             return True
     return False
 
 
 def _parse_and_archive_worker_output(
-    slot: _WorkerSlot, *, return_code: int, archive: "Archive",
-    target: "TargetConstraint", auto_chain_sequence: list[int],
+    slot: _WorkerSlot,
+    *,
+    return_code: int,
+    archive: "Archive",
+    target: "TargetConstraint",
+    auto_chain_sequence: list[int],
     elapsed_gpu_hours: float = 0.0,
     incremental: bool = False,
 ) -> int:
@@ -2128,7 +2281,7 @@ def _parse_and_archive_worker_output(
     tick_id = slot.tick_id
 
     if return_code != 0:
-        # fix22: BoltzGen exits 1 even on full success → attempt parse anyway.
+        # Attempt parsing on nonzero exits because usable outputs may already exist.
         print(
             f"  [worker exit_code={return_code}][gpu={gpu_id}] "
             f"{candidate.method_family} — "
@@ -2156,6 +2309,7 @@ def _parse_and_archive_worker_output(
         requested_output_directory=requested_output_directory,
         target=target,
         tick_id=tick_id,
+        target_pdb_path=str(TARGET_PDB_PATH) if TARGET_PDB_PATH else "",
         parent_pdb_path=slot.parent_pdb_str,
         parent_result_id=slot.parent_result_id,
         target_chains_csv=getattr(slot, "target_chains_csv", ""),
@@ -2221,26 +2375,9 @@ def _parse_and_archive_worker_output(
         flush=True,
     )
 
-    # §22.8.8: synthetic-summary record so method_health.cumulative_gpu_h
-    # tracks ACTUAL GPU time spent on this family — not just time on
-    # records that survived strict gates. Without this, a family that was
-    # tried but produced zero accepted designs (e.g. BindCraft killed at
-    # 90 min before any design passed filters) shows
-    # `cumulative_gpu_h = 0` to the LLM, which then mis-reads it as
-    # "under-explored" and proposes the same family again (observed on
-    # 8813620-2: BindCraft launched 15+ times totaling >22 GPU-h).
-    #
-    # Emit when the parser produced 0 records and either the process failed or
-    # elapsed >= 18 s (= 0.005 h). Failures are always evidence, even when they
-    # happen during import before meaningful GPU time accrues. The earlier
-    # 0.05 h (3 min) threshold was too high —
-    # observed on jobs 8830451-6 that BindCraft on SC2RBD segfaults at
-    # ~36-72 sec (0.01-0.02 h, below 0.05). Those failures consumed real
-    # GPU time but produced NO record at all → method_health.cumulative_gpu_h
-    # stayed at 0 → LLM kept proposing BindCraft thinking it was
-    # "under-explored", launching it 11 more times. Lowering the threshold
-    # to 18 s captures real failures while still skipping dispatch noise
-    # (resolve_parent_artifact misses, immediate SKIP returns).
+    # When no design records were parsed, retain failure status and elapsed compute.
+    # Record all failures and successful empty jobs lasting at least 18 seconds; shorter
+    # successful runs are treated as dispatch noise.
     final_parse_replayed_known_records = (
         (not incremental)
         and len(records) == 0
@@ -2254,9 +2391,8 @@ def _parse_and_archive_worker_output(
             "clean completion after incremental/deduped parse",
             flush=True,
         )
-        if (
-            (had_previously_archived_records or return_code != 0)
-            and (return_code != 0 or elapsed_gpu_hours_delta >= 0.005)
+        if (had_previously_archived_records or return_code != 0) and (
+            return_code != 0 or elapsed_gpu_hours_delta >= 0.005
         ):
             synthetic_result = create_synthetic_result_record(
                 candidate=candidate,
@@ -2335,9 +2471,7 @@ def _parse_and_archive_worker_output(
                 latest_evidence,
             ),
         )
-        auto_chain_sequence[0] = (
-            score_conversion_schedule.final_sequence_number
-        )
+        auto_chain_sequence[0] = score_conversion_schedule.final_sequence_number
         for scheduled_candidate in score_conversion_schedule.scheduled_candidates:
             archive.append(scheduled_candidate)
             print(
@@ -2454,12 +2588,10 @@ def _chain_backfill_ids(
                 route_history.setdefault(key, []).append(row)
 
     dispatches = list(archive.iter_records(DispatchRecord))
-    started_ids = {
-        d.candidate_id for d in dispatches
-        if d.status == "started"
-    }
+    started_ids = {d.candidate_id for d in dispatches if d.status == "started"}
     terminal_or_started = {
-        d.candidate_id for d in dispatches
+        d.candidate_id
+        for d in dispatches
         if d.status == "started"
         or d.status == "parse_failed"
         or (d.status == "dispatch_failed" and not _is_recoverable_dispatch_failure(d))
@@ -2471,7 +2603,11 @@ def _chain_backfill_ids(
     served_weak_by_family: dict[str, int] = {}
     for cid in started_ids | set(seen):
         ac = action_by_id.get(cid)
-        if ac is None or not cid.startswith("chain_") or ac.method_family != "structure_refilter":
+        if (
+            ac is None
+            or not cid.startswith("chain_")
+            or ac.method_family != "structure_refilter"
+        ):
             continue
         ctx = _chain_source_context(
             ac, by_result_id=by_result_id, spawning_actions=spawning_actions
@@ -2519,7 +2655,11 @@ def _chain_backfill_ids(
             continue
         route_row = route_rows.get(route_key)
         family_row = family_rows.get(family)
-        status = str(_route_row_value(route_row, "status", "") or _route_row_value(family_row, "status", "") or "")
+        status = str(
+            _route_row_value(route_row, "status", "")
+            or _route_row_value(family_row, "status", "")
+            or ""
+        )
         promoted = _chain_route_is_promoted(ctx, route_row, family_row)
         native_like = bool(ctx.get("native_like"))
         proxy_promising = bool(ctx.get("proxy_promising"))
@@ -2534,21 +2674,25 @@ def _chain_backfill_ids(
             priority = 4
         else:
             priority = 2
-        grouped_items.setdefault(group, []).append({
-            "cid": cid,
-            "priority": priority,
-            "score": proxy_score,
-            "promoted": promoted,
-            "native_like": native_like,
-            "proxy_promising": proxy_promising,
-            "status": status,
-            "family": family,
-        })
+        grouped_items.setdefault(group, []).append(
+            {
+                "cid": cid,
+                "priority": priority,
+                "score": proxy_score,
+                "promoted": promoted,
+                "native_like": native_like,
+                "proxy_promising": proxy_promising,
+                "status": status,
+                "family": family,
+            }
+        )
 
     by_group: dict[str, list[dict[str, Any]]] = {}
     exhausted_background: list[dict[str, Any]] = []
     for group, items in grouped_items.items():
-        items.sort(key=lambda x: (int(x["priority"]), -float(x["score"]), str(x["cid"])))
+        items.sort(
+            key=lambda x: (int(x["priority"]), -float(x["score"]), str(x["cid"]))
+        )
         route_key = str(group if group.startswith("route::") else "")
         family = str(items[0].get("family") or "_unknown")
         route_row = route_rows.get(route_key)
@@ -2560,9 +2704,7 @@ def _chain_backfill_ids(
         )
         served = served_by_route.get(group, 0)
         observed = int(
-            _route_row_value(
-                route_row, "canonical_score_conversion_count", 0
-            ) or 0
+            _route_row_value(route_row, "canonical_score_conversion_count", 0) or 0
         )
         previous_boundary = max(
             [0] + [t for t in _chain_route_tranches() if t < observed]
@@ -2570,9 +2712,7 @@ def _chain_backfill_ids(
         prior_route_row = None
         for prior in reversed(route_history.get(route_key, [])):
             prior_observed = int(
-                _route_row_value(
-                    prior, "canonical_score_conversion_count", 0
-                ) or 0
+                _route_row_value(prior, "canonical_score_conversion_count", 0) or 0
             )
             if prior_observed <= previous_boundary:
                 prior_route_row = prior
@@ -2585,17 +2725,19 @@ def _chain_backfill_ids(
         allowed = max(0, min(len(items), route_cap - served))
         if allowed <= 0:
             if allow_exhausted_background and items:
-                exhausted_background.append({
-                    "cid": str(items[0]["cid"]),
-                    "family": family,
-                    "priority": int(items[0]["priority"]),
-                    "score": float(items[0]["score"]),
-                    "high_value": bool(
-                        items[0].get("promoted")
-                        or items[0].get("native_like")
-                        or items[0].get("proxy_promising")
-                    ),
-                })
+                exhausted_background.append(
+                    {
+                        "cid": str(items[0]["cid"]),
+                        "family": family,
+                        "priority": int(items[0]["priority"]),
+                        "score": float(items[0]["score"]),
+                        "high_value": bool(
+                            items[0].get("promoted")
+                            or items[0].get("native_like")
+                            or items[0].get("proxy_promising")
+                        ),
+                    }
+                )
             continue
         selected_items = []
         for x in items[:allowed]:
@@ -2604,23 +2746,22 @@ def _chain_backfill_ids(
                 or bool(x.get("native_like"))
                 or bool(x.get("proxy_promising"))
             )
-            selected_items.append({
-                "cid": str(x["cid"]),
-                "family": family,
-                "priority": int(x["priority"]),
-                "score": float(x["score"]),
-                "high_value": high_value,
-            })
+            selected_items.append(
+                {
+                    "cid": str(x["cid"]),
+                    "family": family,
+                    "priority": int(x["priority"]),
+                    "score": float(x["score"]),
+                    "high_value": high_value,
+                }
+            )
         by_group[group] = selected_items
 
     out: list[str] = []
     planned_total_by_family: dict[str, int] = {}
     if admission_tick_id:
         for decision in launch_decisions:
-            if (
-                decision.tick_id != admission_tick_id
-                or decision.status != "launched"
-            ):
+            if decision.tick_id != admission_tick_id or decision.status != "launched":
                 continue
             action = action_by_id.get(decision.candidate_id)
             if action is None or not is_canonical_score_conversion(action):
@@ -2631,9 +2772,7 @@ def _chain_backfill_ids(
                 spawning_actions=spawning_actions,
             )
             family = str(ctx.get("source_family") or "_unknown")
-            planned_total_by_family[family] = (
-                planned_total_by_family.get(family, 0) + 1
-            )
+            planned_total_by_family[family] = planned_total_by_family.get(family, 0) + 1
     planned_weak_by_family: dict[str, int] = {}
     family_tick_cap = _chain_family_score_conversion_tick_cap()
     family_high_tick_cap = _chain_family_score_conversion_high_value_tick_cap()
@@ -2663,7 +2802,9 @@ def _chain_backfill_ids(
                     )
                     if weak_remaining <= 0:
                         continue
-                    planned_weak_by_family[family] = planned_weak_by_family.get(family, 0) + 1
+                    planned_weak_by_family[family] = (
+                        planned_weak_by_family.get(family, 0) + 1
+                    )
                 planned_total_by_family[family] = total_planned + 1
                 out.append(cid)
                 break
@@ -2672,9 +2813,7 @@ def _chain_backfill_ids(
         active = nxt
     if allow_exhausted_background and len(out) < max_n and exhausted_background:
         exhausted_background.sort(
-            key=lambda x: (
-                int(x["priority"]), -float(x["score"]), str(x["cid"])
-            )
+            key=lambda x: (int(x["priority"]), -float(x["score"]), str(x["cid"]))
         )
         for item in exhausted_background:
             family = str(item["family"])
@@ -2775,7 +2914,9 @@ def _fence_started_dispatch_for_recovery(dispatch: DispatchRecord) -> bool:
     # be fenced before replay. A different live leader birth time means the
     # numeric PID/PGID was reused after the old group exited; do not signal it.
     current_start_ticks = _pid_start_ticks(pid if pid_alive else pgid)
-    if current_start_ticks is not None and current_start_ticks != int(recorded_start_ticks):
+    if current_start_ticks is not None and current_start_ticks != int(
+        recorded_start_ticks
+    ):
         return True
     if (
         recorded_host != current_host
@@ -2817,7 +2958,8 @@ def _recover_undispatched_launch_ids(
     actions = {c.candidate_id: c for c in archive.iter_records(ActionCandidate)}
     dispatches = list(archive.iter_records(DispatchRecord))
     terminal = {
-        d.candidate_id for d in archive.iter_records(DispatchRecord)
+        d.candidate_id
+        for d in archive.iter_records(DispatchRecord)
         if d.status == "parse_failed"
         or (d.status == "dispatch_failed" and not _is_recoverable_dispatch_failure(d))
     }
@@ -2851,9 +2993,7 @@ def _recover_undispatched_launch_ids(
         out.append(cid)
         seen.add(cid)
     if chain_backfill_seen is not None:
-        chain_backfill_seen.update(
-            cid for cid in out if cid.startswith("chain_")
-        )
+        chain_backfill_seen.update(cid for cid in out if cid.startswith("chain_"))
     return out
 
 
@@ -2871,7 +3011,9 @@ def _latest_launch_decision(archive, candidate_id: str) -> LaunchDecision | None
     return latest
 
 
-def _latest_launch_decisions_for_pending(archive, pending: list[str]) -> dict[str, LaunchDecision]:
+def _latest_launch_decisions_for_pending(
+    archive, pending: list[str]
+) -> dict[str, LaunchDecision]:
     """Return latest LaunchDecision rows for a pending queue in one archive scan."""
     if archive is None or not pending:
         return {}
@@ -2893,7 +3035,7 @@ def _tick_sort_value(tick_id: str | None) -> int:
     if pos < 0:
         return -1
     digits = []
-    for ch in s[pos + 1:]:
+    for ch in s[pos + 1 :]:
         if ch.isdigit():
             digits.append(ch)
         elif digits:
@@ -2915,7 +3057,9 @@ def _archive_resume_state(
     max_round = 0
     for cls in (EvidenceSummary, LaunchDecision, DispatchRecord, ResultRecord):
         for record in archive.iter_records(cls):
-            max_round = max(max_round, _tick_sort_value(getattr(record, "tick_id", None)))
+            max_round = max(
+                max_round, _tick_sort_value(getattr(record, "tick_id", None))
+            )
     elapsed_wall_h = max(
         (float(e.elapsed_wall_h or 0.0) for e in archive.iter_records(EvidenceSummary)),
         default=0.0,
@@ -2983,7 +3127,12 @@ def _pending_priority_key(
     signals and newer decisions, and demotes lifetime-memory-only exact replays.
     """
     if cid.startswith("chain_"):
-        return (0, 0, -_tick_sort_value(getattr(launch_decision, "tick_id", None)), original_index)
+        return (
+            0,
+            0,
+            -_tick_sort_value(getattr(launch_decision, "tick_id", None)),
+            original_index,
+        )
 
     text = _pending_signal_priority_text(cand, launch_decision)
     current_signal = (
@@ -2993,8 +3142,12 @@ def _pending_priority_key(
         or "recent_su" in text
         or "recent_near_miss" in text
     )
-    diagnostic_signal = "diagnostic_improvement_score" in text or "diagnostic_axes=" in text
-    stale_lifetime_only = "source=lifetime_memory" in text and "no_recent_signal=1" in text
+    diagnostic_signal = (
+        "diagnostic_improvement_score" in text or "diagnostic_axes=" in text
+    )
+    stale_lifetime_only = (
+        "source=lifetime_memory" in text and "no_recent_signal=1" in text
+    )
     if current_signal:
         signal_rank = 1
     elif diagnostic_signal:
@@ -3034,7 +3187,9 @@ def _prioritize_pending_queue(
     pending[:] = [cid for _, cid in indexed]
 
 
-def _action_candidate_by_id(archive, candidate_id: str | None) -> ActionCandidate | None:
+def _action_candidate_by_id(
+    archive, candidate_id: str | None
+) -> ActionCandidate | None:
     if archive is None or not candidate_id:
         return None
     latest: ActionCandidate | None = None
@@ -3051,12 +3206,19 @@ def _score_credit_basis_for_candidate(cand: ActionCandidate | None) -> str | Non
     if cand is None:
         return None
     refilter_role = infer_refilter_role(cand)
-    if cand.method_family == "structure_refilter" and refilter_role == CANONICAL_SCORE_CONVERSION:
+    if (
+        cand.method_family == "structure_refilter"
+        and refilter_role == CANONICAL_SCORE_CONVERSION
+    ):
         return "official_score_conversion"
-    if cand.method_family == "structure_refilter" and refilter_role == PARENT_MODEL_REFOLD:
+    if (
+        cand.method_family == "structure_refilter"
+        and refilter_role == PARENT_MODEL_REFOLD
+    ):
         return "advisory_refold_only"
     try:
         from .capability_registry import default_registry
+
         cap = default_registry().get(cand.method_family)
         if bool(getattr(cap, "outputs_diagnostic_only", False)):
             return "requires_canonical_score_conversion"
@@ -3082,13 +3244,18 @@ def _dispatch_record_metadata(
         cand = _action_candidate_by_id(archive, candidate_id)
     meta = (
         getattr(launch_decision, "resource_class_concrete", None)
-        if launch_decision is not None else None
+        if launch_decision is not None
+        else None
     ) or {}
-    supervisor_mode = getattr(cand, "supervisor_mode", None) if cand is not None else None
+    supervisor_mode = (
+        getattr(cand, "supervisor_mode", None) if cand is not None else None
+    )
     if supervisor_mode is None:
         supervisor_mode = meta.get("mode")
     return {
-        "method_family": getattr(cand, "method_family", None) if cand is not None else None,
+        "method_family": getattr(cand, "method_family", None)
+        if cand is not None
+        else None,
         "operator_id": getattr(cand, "operator_id", None) if cand is not None else None,
         "supervisor_mode": supervisor_mode,
         "refilter_role": infer_refilter_role(cand) if cand is not None else None,
@@ -3105,58 +3272,63 @@ def _append_parse_failed_dispatch_record(
         return
     cid = slot.cand.candidate_id
     launch_decision = _latest_launch_decision(archive, cid)
-    archive.append(DispatchRecord(
-        dispatch_id=(
-            f"parse_failed_{slot.tick_id or 'unknown'}_"
-            f"{_short_id(cid + ':' + str(time.time()))}"
-        ),
-        launch_id=(
-            launch_decision.launch_id if launch_decision is not None else None
-        ),
-        tick_id=slot.tick_id or "unknown",
-        candidate_id=cid,
-        status="parse_failed",
-        worker_slot=str(slot.slot_id),
-        gpu_id=str(slot.gpu_id),
-        output_dir=str(slot.out_dir) if slot.out_dir is not None else None,
-        parent_result_id=slot.parent_result_id or None,
-        parent_pdb_path=slot.parent_pdb_str or None,
-        **_dispatch_record_metadata(cand=slot.cand, launch_decision=launch_decision),
-        attempt=1,
-        why=reason[:300],
-    ))
-    # R1-2 (2026-06-11): a parse EXCEPTION after meaningful GPU time otherwise
-    # loses that elapsed compute (DispatchRecords are not in all_results, so the
-    # dry timer never sees it). When the caller passes target_id (the in-loop
-    # exception handlers do), append a synthetic no-artifact ResultRecord with the
-    # elapsed GPU-h so gpu_h_since_last_su counts it. metrics={} so it can never
-    # become a strict/SU success. Callers that deliberately do NOT fabricate a
-    # record (e.g. the in-parse no-artifact path) pass target_id=None → no-op.
+    archive.append(
+        DispatchRecord(
+            dispatch_id=(
+                f"parse_failed_{slot.tick_id or 'unknown'}_"
+                f"{_short_id(cid + ':' + str(time.time()))}"
+            ),
+            launch_id=(
+                launch_decision.launch_id if launch_decision is not None else None
+            ),
+            tick_id=slot.tick_id or "unknown",
+            candidate_id=cid,
+            status="parse_failed",
+            worker_slot=str(slot.slot_id),
+            gpu_id=str(slot.gpu_id),
+            output_dir=str(slot.out_dir) if slot.out_dir is not None else None,
+            parent_result_id=slot.parent_result_id or None,
+            parent_pdb_path=slot.parent_pdb_str or None,
+            **_dispatch_record_metadata(
+                cand=slot.cand, launch_decision=launch_decision
+            ),
+            attempt=1,
+            why=reason[:300],
+        )
+    )
+    # Retain elapsed compute after parsing fails when target_id is known. Empty
+    # measurements prevent this failure record from qualifying.
     if target_id and slot.launched_at and slot.launched_at > 0:
         elapsed_gpu_h = max(0.0, (time.time() - slot.launched_at) / 3600.0)
         if elapsed_gpu_h >= 0.005:
             from .schemas import ResultRecord as _RR
+
             fam = slot.cand.method_family if slot.cand is not None else "unknown"
             pids = [cid]
             if slot.parent_result_id:
                 pids.append(slot.parent_result_id)
             role = infer_refilter_role(slot.cand) if slot.cand is not None else None
-            archive.append(_RR(
-                result_id=f"synth_parsefail_{cid}_{int(time.time()):x}"[:80],
-                parent_ids=pids,
-                target_id=target_id,
-                backend_family=fam,
-                runtime_bucket_id="rb_v7",
-                metrics={}, metrics_calibrated={}, route_lineage=[fam],
-                gpu_h=elapsed_gpu_h, exit_status="no_artifacts",  # type: ignore[arg-type]
-                bins={"refilter_role": role} if role else {}, artifacts={}, panel_ready=False,
-                tick_id=slot.tick_id or None,
-            ))
+            archive.append(
+                _RR(
+                    result_id=f"synth_parsefail_{cid}_{int(time.time()):x}"[:80],
+                    parent_ids=pids,
+                    target_id=target_id,
+                    backend_family=fam,
+                    runtime_bucket_id="rb_v7",
+                    metrics={},
+                    metrics_calibrated={},
+                    route_lineage=[fam],
+                    gpu_h=elapsed_gpu_h,
+                    exit_status="no_artifacts",  # type: ignore[arg-type]
+                    bins={"refilter_role": role} if role else {},
+                    artifacts={},
+                    panel_ready=False,
+                    tick_id=slot.tick_id or None,
+                )
+            )
 
 
-def _chain_refilter_reserve_limit(
-    queue_room: int, backlog_n: int | None = None
-) -> int:
+def _chain_refilter_reserve_limit(queue_room: int, backlog_n: int | None = None) -> int:
     """Per-round score-conversion reserve for diagnostic auto-chain refilters.
 
     Idle-only backfill under-credits diagnostic lanes: when the generator queue
@@ -3190,9 +3362,7 @@ def _chain_refilter_reserve_limit(
     if backlog_n <= 0:
         return 0
     try:
-        frac = float(
-            os.environ.get("TREX_CHAIN_REFILTER_RESERVE_MAX_FRACTION", "0.5")
-        )
+        frac = float(os.environ.get("TREX_CHAIN_REFILTER_RESERVE_MAX_FRACTION", "0.5"))
     except ValueError:
         frac = 0.5
     frac = min(max(frac, 0.0), 1.0)
@@ -3238,7 +3408,9 @@ def _chain_candidate_native_like(archive, candidate_id: str) -> bool:
 
 
 def _chain_escape_share_allowance(archive, available_ids: list[str]) -> int:
-    native_ids = [cid for cid in available_ids if _chain_candidate_native_like(archive, cid)]
+    native_ids = [
+        cid for cid in available_ids if _chain_candidate_native_like(archive, cid)
+    ]
     if native_ids:
         try:
             evs = list(archive.iter_records(EvidenceSummary))
@@ -3247,9 +3419,15 @@ def _chain_escape_share_allowance(archive, available_ids: list[str]) -> int:
             state = ""
         if state == "deep_stall":
             return 1
-        native_cap = _bounded_int_env("TREX_CHAIN_REFILTER_NATIVE_ESCAPE_MAX", 2, min_value=1)
+        native_cap = _bounded_int_env(
+            "TREX_CHAIN_REFILTER_NATIVE_ESCAPE_MAX", 2, min_value=1
+        )
         return min(native_cap, len(native_ids))
-    return 1 if any(_chain_candidate_has_escape_value(archive, cid) for cid in available_ids) else 0
+    return (
+        1
+        if any(_chain_candidate_has_escape_value(archive, cid) for cid in available_ids)
+        else 0
+    )
 
 
 def _chain_candidate_has_escape_value(archive, candidate_id: str) -> bool:
@@ -3313,14 +3491,17 @@ def _chain_refilter_recent_share_cap(
     except ValueError:
         base_share = 0.60
     try:
-        dup_share = float(os.environ.get("TREX_CHAIN_REFILTER_MAX_SHARE_DUPLICATE", "0.50"))
+        dup_share = float(
+            os.environ.get("TREX_CHAIN_REFILTER_MAX_SHARE_DUPLICATE", "0.50")
+        )
     except ValueError:
         dup_share = 0.50
     base_share = min(max(base_share, 0.0), 1.0)
     dup_share = min(max(dup_share, 0.0), 1.0)
 
     starts = [
-        d for d in archive.iter_records(DispatchRecord)
+        d
+        for d in archive.iter_records(DispatchRecord)
         if getattr(d, "status", "") == "started"
     ][-window:]
     launch_by_id = {
@@ -3343,13 +3524,14 @@ def _chain_refilter_recent_share_cap(
         state = str(getattr(evs[-1], "state_label", "") or "") if evs else ""
     except Exception:  # noqa: BLE001
         state = ""
-    max_share = dup_share if state in {"productive_duplicate", "strict_duplicate_collapse"} else base_share
+    max_share = (
+        dup_share
+        if state in {"productive_duplicate", "strict_duplicate_collapse"}
+        else base_share
+    )
     if len(starts) < min_n:
-        # Early-run bootstrap used to hard-cap chain refilter starts at 4 until
-        # 20 total dispatches. On hard targets with many BoltzGen/MPNN artifacts
-        # this delayed the only SU-minting path. Default the bootstrap allowance
-        # to the same share budget used after min_n, while preserving the env
-        # override for stricter ablations.
+        # The bootstrap allowance uses the same share budget as later dispatches
+        # unless explicitly overridden.
         raw_bootstrap = os.environ.get("TREX_CHAIN_REFILTER_BOOTSTRAP_MAX")
         if raw_bootstrap is None or str(raw_bootstrap).strip() == "":
             bootstrap_max = int(math.floor(max_share * max(1, min_n)))
@@ -3370,15 +3552,15 @@ def _chain_refilter_recent_share_cap(
     return min(requested, _chain_escape_share_allowance(archive, available_ids))
 
 
-
 def _chain_escape_first(archive, ids: list[str]) -> list[str]:
     """Move the one allowed native/promoted escape to the front under share caps."""
     for i, cid in enumerate(ids):
         if _chain_candidate_has_escape_value(archive, cid):
             if i == 0:
                 return ids
-            return [cid] + ids[:i] + ids[i + 1:]
+            return [cid] + ids[:i] + ids[i + 1 :]
     return ids
+
 
 def _append_chain_launch_decisions(
     archive,
@@ -3389,23 +3571,25 @@ def _append_chain_launch_decisions(
     why: str,
 ) -> None:
     for j, cid in enumerate(ids):
-        archive.append(LaunchDecision(
-            launch_id=f"{source}_{tick_id}_{j:02d}_{_short_id(cid)}",
-            tick_id=tick_id,
-            candidate_id=cid,
-            status="launched",
-            resource_class_concrete={
-                "class": "low",
-                # System-reserved canonical scoring lane. Do not tag as
-                # "rescue": recent mode windows use {exploit,rescue,explore}
-                # to preserve LLM allocation shares, and deterministic
-                # chain-refilter backfill should not consume that rescue budget.
-                "mode": "chain_refilter",
-                "refilter_role": CANONICAL_SCORE_CONVERSION,
-                "source": source,
-            },
-            why=why,
-        ))
+        archive.append(
+            LaunchDecision(
+                launch_id=f"{source}_{tick_id}_{j:02d}_{_short_id(cid)}",
+                tick_id=tick_id,
+                candidate_id=cid,
+                status="launched",
+                resource_class_concrete={
+                    "class": "low",
+                    # System-reserved canonical scoring lane. Do not tag as
+                    # "rescue": recent mode windows use {exploit,rescue,explore}
+                    # to preserve LLM allocation shares, and deterministic
+                    # chain-refilter backfill should not consume that rescue budget.
+                    "mode": "chain_refilter",
+                    "refilter_role": CANONICAL_SCORE_CONVERSION,
+                    "source": source,
+                },
+                why=why,
+            )
+        )
 
 
 def _has_native_strict_like_pending_refilter(archive) -> bool:
@@ -3426,17 +3610,15 @@ def _has_native_strict_like_pending_refilter(archive) -> bool:
         )
     except Exception:  # noqa: BLE001
         return False
-    # The deep_stall 1-slot conversion floor (P0-2) opens whenever an accepted
-    # diagnostic artifact is still awaiting canonical AF2 scoring — sunk generator
-    # compute the chain can still turn into SU. F3 caps the per-round union to 1
-    # slot, so this stays a minimal escape valve, not a re-opened grind. (A
-    # cold-start-capped artifact with no chain candidate keeps this True but is a
-    # harmless no-op: the reserve only launches existing chain candidates, finds
-    # none, and reserves nothing — verified, so no spurious slot is consumed.)
+    # Allow a minimal evaluation reserve while accepted diagnostic artifacts await
+    # scoring. The per-round cap still bounds actual starts.
     if int(backlog.get("total_unscored_diagnostic_artifacts", 0) or 0) > 0:
         return True
     for row in (backlog.get("by_family") or {}).values():
-        if isinstance(row, dict) and int(row.get("native_strict_like_pending_refilter", 0) or 0) > 0:
+        if (
+            isinstance(row, dict)
+            and int(row.get("native_strict_like_pending_refilter", 0) or 0) > 0
+        ):
             return True
     return False
 
@@ -3513,7 +3695,10 @@ def _score_conversion_feedback_inflight(archive, pool) -> bool:
     cheap monitoring refreshes, but must not fence LLM planning or generator
     dispatch.
     """
-    return _high_value_score_conversion_pending(archive) and _busy_score_conversion_count(pool) > 0
+    return (
+        _high_value_score_conversion_pending(archive)
+        and _busy_score_conversion_count(pool) > 0
+    )
 
 
 def _score_conversion_reserve_room(archive, queue_room: int) -> tuple[int, bool]:
@@ -3534,16 +3719,19 @@ def _score_conversion_reserve_room(archive, queue_room: int) -> tuple[int, bool]
 try:
     _FAMILY_MAX_NOYIELD_KILLS = max(
         1,
-        int(os.environ.get(
-            "TREX_FAMILY_MAX_NOYIELD_KILLS",
-            os.environ.get("TREX_BINDCRAFT_MAX_TIMEOUTS", "2"),
-        )),
+        int(
+            os.environ.get(
+                "TREX_FAMILY_MAX_NOYIELD_KILLS",
+                os.environ.get("TREX_BINDCRAFT_MAX_TIMEOUTS", "2"),
+            )
+        ),
     )
 except ValueError:
     _FAMILY_MAX_NOYIELD_KILLS = 2
 try:
     _FAMILY_CIRCUIT_MIN_GPU_H = max(
-        0.0, float(os.environ.get("TREX_FAMILY_CIRCUIT_MIN_GPU_H", "3.0")))
+        0.0, float(os.environ.get("TREX_FAMILY_CIRCUIT_MIN_GPU_H", "3.0"))
+    )
 except ValueError:
     _FAMILY_CIRCUIT_MIN_GPU_H = 3.0
 
@@ -3558,23 +3746,19 @@ def _lazy_rechain_stranded_diagnostic_artifacts(
     chain_seq_ref: list[int],
     target_buffer: int,
 ) -> int:
-    """Create missing score-conversion candidates for diagnostic artifacts.
+    """Recover missing evaluation candidates for diagnostic artifacts.
 
-    Current runs create chain candidates for all valid, non-duplicate diagnostic
-    artifacts at parse time. This helper remains as a recovery path for legacy
-    archives, explicit emergency caps, or artifacts accepted before the chain
-    candidate could be appended. It only CREATES queued candidates (it consumes no GPU slot;
-    the deep_stall throttle + F3 round cap still bound how many actually drain), and it
-    tops up only to ``target_buffer`` pending candidates so a flooded lineage cannot
-    bloat the archive. Round-robins by source family (same anti-monopoly guard as F1's
-    ``_chain_backfill_ids``). Returns the number minted."""
+    Top up to target_buffer in source-family round-robin order. This queues work;
+    dispatch throttles and round limits still control execution.
+    """
     if target_buffer <= 0:
         return 0
     results = list(archive.iter_records(ResultRecord))
     actions = list(archive.iter_records(ActionCandidate))
     dispatches = list(archive.iter_records(DispatchRecord))
     terminal_or_started = {
-        d.candidate_id for d in dispatches
+        d.candidate_id
+        for d in dispatches
         if d.status == "started"
         or d.status == "parse_failed"
         or (d.status == "dispatch_failed" and not _is_recoverable_dispatch_failure(d))
@@ -3590,8 +3774,10 @@ def _lazy_rechain_stranded_diagnostic_artifacts(
     have_chain_parent: set[str] = set()
     pending_chain = 0
     for c in actions:
-        if not (c.candidate_id.startswith("chain_")
-                and c.method_family == "structure_refilter"):
+        if not (
+            c.candidate_id.startswith("chain_")
+            and c.method_family == "structure_refilter"
+        ):
             continue
         if c.parent_result_id:
             have_chain_parent.add(c.parent_result_id)
@@ -3608,21 +3794,28 @@ def _lazy_rechain_stranded_diagnostic_artifacts(
         return 0
     by_src: dict[str, list[ResultRecord]] = {}
     for r in results:
-        if (_record_needs_score_conversion(r.backend_family, r)
-                and r.result_id not in refilter_sources
-                and r.result_id not in have_chain_parent
-                and _score_conversion_identity(r) not in scored_or_queued_identities):
+        if (
+            _record_needs_score_conversion(r.backend_family, r)
+            and r.result_id not in refilter_sources
+            and r.result_id not in have_chain_parent
+            and _score_conversion_identity(r) not in scored_or_queued_identities
+        ):
             scored_or_queued_identities.add(_score_conversion_identity(r))
             by_src.setdefault(r.backend_family, []).append(r)
     if not by_src:
         return 0
     from .capability_registry import default_registry as _dr
+
     sr_cap = _dr().get("structure_refilter")
     if sr_cap is None or sr_cap.availability != "available":
         return 0
     feas = FeasibilityCheck(
-        backend_healthy=True, runtime_bucket_id="rb_v7", compiler_ok=True,
-        verifier_ok=True, route_cap_ok=True, cost_ok=True,
+        backend_healthy=True,
+        runtime_bucket_id="rb_v7",
+        compiler_ok=True,
+        verifier_ok=True,
+        route_cap_ok=True,
+        cost_ok=True,
     )
     minted = 0
     active = [s for s in by_src if by_src[s]]
@@ -3682,38 +3875,25 @@ def _queue_chain_refilter_reserve(
     max_reserve_cap: int | None = None,
     chain_seq_ref: list[int] | None = None,
 ) -> list[str]:
-    """Queue bounded diagnostic chain refilters ahead of stale generator work.
+    """Reserve bounded evaluation work ahead of queued generation.
 
-    The reserve exists because diagnostic-only generators (BindCraft/BoltzGen/
-    ProteinMPNN) do not create strict/SU records until structure_refilter scores
-    their accepted artifacts. Appending reserve candidates behind an already
-    primed generator queue still delays that scoring path; prepend the bounded
-    reserve so the next free worker converts diagnostic artifacts first without
-    letting refilters monopolize the pool.
-
-    F4/F5b (2026-06-10): ``throttled`` (set when the latest state is deep_stall)
-    suppresses most reserve work once a target has spent >= deep_stall_gpu_h of
-    WORKER GPU-h with zero new SU. Exception: if the archive has a native-strict-
-    like diagnostic artifact still waiting for canonical AF2 scoring, keep a
-    minimal one-slot reserve so fallback deep_stall cannot become absorbing.
+    Diagnostic artifacts need standardized scoring before they can qualify. Deep-stall
+    throttling retains a minimal reserve for promising artifacts without allowing
+    evaluation to monopolize workers.
     """
-    # registry-001 (2026-06-18): top up the stranded-artifact chain queue BEFORE
-    # draining, so the cold-start auto-chain cap cannot permanently lose SU. Minting
-    # only QUEUES candidates (no GPU slot consumed); the throttle gate + round cap
-    # below still bound how many actually drain this round.
+    # Recover missing evaluation candidates before draining; queue creation does not
+    # consume a worker slot.
     if chain_seq_ref is not None:
         _lazy_rechain_stranded_diagnostic_artifacts(
-            archive, tick_id=tick_id, chain_seq_ref=chain_seq_ref,
+            archive,
+            tick_id=tick_id,
+            chain_seq_ref=chain_seq_ref,
             target_buffer=max(queue_room, _LAZY_RECHAIN_BUFFER),
         )
     if throttled and not _has_native_strict_like_pending_refilter(archive):
         return []
-    action_by_id = {
-        c.candidate_id: c for c in archive.iter_records(ActionCandidate)
-    }
-    if any(
-        is_canonical_score_conversion(action_by_id.get(cid)) for cid in pending
-    ):
+    action_by_id = {c.candidate_id: c for c in archive.iter_records(ActionCandidate)}
+    if any(is_canonical_score_conversion(action_by_id.get(cid)) for cid in pending):
         return []
     # Probe the actual eligible backlog (bounded by queue_room — we never reserve
     # more than that) FIRST, then size the reserve to it so a large unscored pile
@@ -3733,7 +3913,7 @@ def _queue_chain_refilter_reserve(
     # Per-ROUND cap: the caller passes how many reserves remain in this round's
     # budget so predispatch + refill reserves cannot COMPOUND to fill the whole
     # pool and starve fresh generation (the gen-slot guarantee is otherwise only
-    # per-call). None = no round cap (single-call sites keep legacy behavior).
+    # per-call). None leaves the per-round reservation uncapped.
     if max_reserve_cap is not None:
         reserve_n = min(reserve_n, max(0, max_reserve_cap))
     reserve_n = _chain_refilter_recent_share_cap(archive, reserve_n, available)
@@ -3782,29 +3962,30 @@ def _cancel_pending_chain_reserves_for_deep_stall(
     pending[:] = kept
     for cid in cancelled:
         launch_decision = _latest_launch_decision(archive, cid)
-        archive.append(DispatchRecord(
-            dispatch_id=(
-                f"deep_stall_throttle_{tick_id}_{_short_id(cid)}"
-            ),
-            launch_id=(
-                launch_decision.launch_id
-                if launch_decision is not None else None
-            ),
-            tick_id=tick_id,
-            candidate_id=cid,
-            status="dispatch_failed",
-            worker_slot=None,
-            gpu_id=None,
-            output_dir=None,
-            parent_result_id=None,
-            parent_pdb_path=None,
-            **_dispatch_record_metadata(archive, candidate_id=cid, launch_decision=launch_decision),
-            attempt=1,
-            why=(
-                "current tick state=deep_stall; cancelled deterministic "
-                "diagnostic score-conversion reserve before dispatch"
-            ),
-        ))
+        archive.append(
+            DispatchRecord(
+                dispatch_id=(f"deep_stall_throttle_{tick_id}_{_short_id(cid)}"),
+                launch_id=(
+                    launch_decision.launch_id if launch_decision is not None else None
+                ),
+                tick_id=tick_id,
+                candidate_id=cid,
+                status="dispatch_failed",
+                worker_slot=None,
+                gpu_id=None,
+                output_dir=None,
+                parent_result_id=None,
+                parent_pdb_path=None,
+                **_dispatch_record_metadata(
+                    archive, candidate_id=cid, launch_decision=launch_decision
+                ),
+                attempt=1,
+                why=(
+                    "current tick state=deep_stall; cancelled deterministic "
+                    "diagnostic score-conversion reserve before dispatch"
+                ),
+            )
+        )
     return cancelled
 
 
@@ -3823,7 +4004,10 @@ def _should_pause_initial_no_evidence_prefetch(
     the soft stale policy before real feedback is incorporated. Pause refill
     until the first completed worker result creates actual evidence.
     """
-    return int(completed_children or 0) <= 0 and int(busy_count or 0) >= int(pool_size or 0) > 0
+    return (
+        int(completed_children or 0) <= 0
+        and int(busy_count or 0) >= int(pool_size or 0) > 0
+    )
 
 
 def _drop_stale_scientific_pending(
@@ -3835,18 +4019,11 @@ def _drop_stale_scientific_pending(
     current_state_label: str | None,
     tick_id: str,
 ) -> list[str]:
-    """Drop queued non-system launches only when they are truly invalidated.
+    """Drop queued jobs when their eligibility is invalidated.
 
-    v7_3 originally dropped any scientific prefetch whose planned completed/SU
-    counts differed from the current evidence. In the event-driven controller
-    that condition is almost always true after any worker returns, so many
-    selected explore/rescue candidates never reached a GPU. Default policy is
-    now SOFT: ordinary evidence growth, including entry into deep_stall, does
-    not invalidate a selected candidate. This keeps the Planner/Supervisor/
-    Selector decision aligned with actual GPU starts: a hard target may
-    deliberately select an exploit/rescue escape from the only SU-producing
-    route. Set TREX_PREFETCH_STALE_POLICY=hard to use the old count/SU/state
-    invalidation for ablations.
+    The default soft policy retains jobs after ordinary evidence growth.
+    TREX_PREFETCH_STALE_POLICY=hard also invalidates them on completed-count, SU-count,
+    or state changes.
     """
     policy = os.environ.get("TREX_PREFETCH_STALE_POLICY", "soft").strip().lower()
     hard_policy = policy in {"hard", "strict", "count", "counts"}
@@ -3861,7 +4038,8 @@ def _drop_stale_scientific_pending(
         launch_decision = _latest_launch_decision(archive, cid)
         meta = (
             getattr(launch_decision, "resource_class_concrete", None)
-            if launch_decision is not None else None
+            if launch_decision is not None
+            else None
         ) or {}
         planned_children = meta.get("planned_completed_children")
         planned_su = meta.get("planned_run_su_count")
@@ -3885,7 +4063,11 @@ def _drop_stale_scientific_pending(
             stale_reasons.append(
                 f"initial_no_evidence_prefetch completed_children {planned_children}->{current_completed_children}"
             )
-        if hard_policy and planned_children is not None and current_completed_children is not None:
+        if (
+            hard_policy
+            and planned_children is not None
+            and current_completed_children is not None
+        ):
             if int(planned_children) != int(current_completed_children):
                 stale = True
                 stale_reasons.append(
@@ -3894,8 +4076,14 @@ def _drop_stale_scientific_pending(
         if hard_policy and planned_su is not None and current_run_su_count is not None:
             if int(planned_su) != int(current_run_su_count):
                 stale = True
-                stale_reasons.append(f"run_su_count {planned_su}->{current_run_su_count}")
-        if hard_policy and planned_state is not None and current_state_label is not None:
+                stale_reasons.append(
+                    f"run_su_count {planned_su}->{current_run_su_count}"
+                )
+        if (
+            hard_policy
+            and planned_state is not None
+            and current_state_label is not None
+        ):
             if str(planned_state) != str(current_state_label):
                 stale = True
                 stale_reasons.append(f"state {planned_state}->{current_state_label}")
@@ -3905,33 +4093,35 @@ def _drop_stale_scientific_pending(
             continue
 
         dropped.append(cid)
-        archive.append(DispatchRecord(
-            dispatch_id=f"stale_prefetch_{tick_id}_{_short_id(cid)}",
-            launch_id=(
-                launch_decision.launch_id
-                if launch_decision is not None else None
-            ),
-            tick_id=tick_id,
-            candidate_id=cid,
-            status="dispatch_failed",
-            worker_slot=None,
-            gpu_id=None,
-            output_dir=None,
-            parent_result_id=None,
-            parent_pdb_path=None,
-            **_dispatch_record_metadata(archive, candidate_id=cid, launch_decision=launch_decision),
-            attempt=1,
-            why=(
-                "stale scientific prefetch: "
-                + ("; ".join(stale_reasons) if stale_reasons else "invalidated")
-                + f" (policy={policy})"
-            ),
-        ))
+        archive.append(
+            DispatchRecord(
+                dispatch_id=f"stale_prefetch_{tick_id}_{_short_id(cid)}",
+                launch_id=(
+                    launch_decision.launch_id if launch_decision is not None else None
+                ),
+                tick_id=tick_id,
+                candidate_id=cid,
+                status="dispatch_failed",
+                worker_slot=None,
+                gpu_id=None,
+                output_dir=None,
+                parent_result_id=None,
+                parent_pdb_path=None,
+                **_dispatch_record_metadata(
+                    archive, candidate_id=cid, launch_decision=launch_decision
+                ),
+                attempt=1,
+                why=(
+                    "stale scientific prefetch: "
+                    + ("; ".join(stale_reasons) if stale_reasons else "invalidated")
+                    + f" (policy={policy})"
+                ),
+            )
+        )
 
     if dropped:
         pending[:] = kept
     return dropped
-
 
 
 def _dispatch_pending_to_free_slots(
@@ -3973,7 +4163,6 @@ def _dispatch_pending_to_free_slots(
         deferred_audits=dispatch_defer_seen,
         max_dispatch_retries=_MAX_DISPATCH_RETRIES,
     )
-
 
 
 def _require_foldseek_available(binary: str = "foldseek") -> str:
@@ -4084,12 +4273,14 @@ def _resolve_worker_hard_ceiling_seconds(method_family: str) -> float:
     """Resolve one built-in or extension backend's hang backstop."""
 
     extension_adapter = get_backend_adapter(method_family)
-    return float(HARD_CEILING_S.get(
-        method_family,
-        extension_adapter.hard_ceiling_seconds
-        if extension_adapter is not None
-        else _DEFAULT_HARD_CEILING_S,
-    ))
+    return float(
+        HARD_CEILING_S.get(
+            method_family,
+            extension_adapter.hard_ceiling_seconds
+            if extension_adapter is not None
+            else _DEFAULT_HARD_CEILING_S,
+        )
+    )
 
 
 def _worker_supervision_dependencies() -> WorkerSupervisionDependencies:
@@ -4156,10 +4347,9 @@ def main(
     tgt_data = json.loads(args.target_constraint.read_text())
     target = TargetConstraint(**tgt_data)
 
-    # Fix AF2-refilter chain detection: record the target's residue count so
-    # _resolve_pdb_chains can identify the (verbatim-copied) target chain by
-    # size rather than the wrong "shorter==binder" heuristic (2026-05-28).
-    global TARGET_RES_COUNT, TARGET_CHAIN_IDS
+    # Bind output chain verification to the configured target reference.
+    global TARGET_PDB_PATH, TARGET_RES_COUNT, TARGET_CHAIN_IDS
+    TARGET_PDB_PATH = Path(args.target_pdb).resolve()
     TARGET_CHAIN_IDS = tuple(target.chain_ids)
     _tcounts = _pdb_residues_per_chain(Path(args.target_pdb))
     TARGET_RES_COUNT = max(_tcounts.values()) if _tcounts else None
@@ -4169,40 +4359,26 @@ def main(
         flush=True,
     )
 
-    # §22.8.1: per-target single-archive contract. One T-ReX process serves
-    # exactly one target; archive contains records for only that target.
-    # Refuse to run on an archive that already holds foreign target_ids
-    # — would silently mix tick history in EvidenceReducer / LLMCallRecord
-    # consumers (live_tick._recent_fallback_rate, critic-flag carryover).
-    foreign_targets = {
-        r.target_id for r in archive.iter_records(ResultRecord)
-    } - {target.target_id}
+    # One controller process serves one target. Reject archives containing another
+    # target to avoid mixing evidence.
+    foreign_targets = {r.target_id for r in archive.iter_records(ResultRecord)} - {
+        target.target_id
+    }
     if foreign_targets:
         raise SystemExit(
             f"[v7_controller] archive {args.archive_root} contains foreign "
             f"target_ids {sorted(foreign_targets)} — refuse to run multi-target"
         )
 
-    # On Princeton della: BindCraft + Complexa (uv-based .venv) both available.
-    # Active stack: structure_refilter, proteinmpnn_redesign and BoltzGen.
-    # Baseline mode (2026-05-26): when --enabled-families is provided, mark
-    # every other registered family unavailable so the planner only proposes
-    # from the whitelist. Used while the wider Phase 2 stack is being
-    # debugged — produces a clean 48h baseline restricted to families with
-    # known-good wrappers (typically the 4 Complexa + bindcraft).
+    # Limit the available registry to the explicitly enabled families.
     from .capability_registry import default_registry
 
     backend_registry = default_registry()
     all_backend_families = tuple(backend_registry.capabilities.keys())
     if args.enabled_families.strip():
         whitelist = {f.strip() for f in args.enabled_families.split(",") if f.strip()}
-        # Guard (2026-05-31, widened 2026-07-02): diagnostic-only families
-        # (BindCraft/BoltzGen/ProteinMPNN)
-        # produce no official strict/SU on their own. Their artifacts must pass
-        # through canonical structure_refilter for AF2 strict metrics. If the
-        # whitelist enables such a family but omits structure_refilter, the
-        # auto-chain silently skips and the family becomes a dead lane. Auto-enable
-        # structure_refilter and warn loudly rather than burn a 48h job.
+        # Diagnostic-only families require standardized evaluation. Enable
+        # structure_refilter when needed so their outputs can qualify.
         diagnostic_native_families = {
             family
             for family in whitelist
@@ -4217,7 +4393,8 @@ def main(
                 f"{sorted(diagnostic_native_families)} "
                 f"need structure_refilter to yield official strict/SU (their artifacts "
                 f"auto-chain through it); it was missing from --enabled-families → "
-                f"auto-enabling structure_refilter to avoid a dead lane.", flush=True,
+                f"auto-enabling structure_refilter to avoid a dead lane.",
+                flush=True,
             )
             whitelist.add("structure_refilter")
         configured_unavailable_families: tuple[str, ...] = tuple(
@@ -4261,9 +4438,12 @@ def main(
         supervisor=dc_replace(
             base_cfg.supervisor, base_url=args.vllm_base_url, model=args.llm_model
         ),
-        critic=dc_replace(base_cfg.critic, base_url=args.vllm_base_url,
-                            model=args.llm_model,
-                            enabled=bool(args.enable_critic)),
+        critic=dc_replace(
+            base_cfg.critic,
+            base_url=args.vllm_base_url,
+            model=args.llm_model,
+            enabled=bool(args.enable_critic),
+        ),
         selector=selector_cfg,
         foldseek=foldseek_cfg,
         builder=dc_replace(
@@ -4274,8 +4454,8 @@ def main(
         enable_exemplars=bool(args.enable_exemplars),
         worker_wall_gpu_count=len(worker_gpus),
     )
-    enabled_backend_families = (
-        set(all_backend_families) - set(configured_unavailable_families)
+    enabled_backend_families = set(all_backend_families) - set(
+        configured_unavailable_families
     )
     p2_runtime = _require_p2_runtime_available(
         require_af2="structure_refilter" in enabled_backend_families,
@@ -4290,8 +4470,14 @@ def main(
         )
     foldseek_path = _require_foldseek_available(cfg.foldseek.binary)
     print(f"[v7_controller] foldseek_binary={foldseek_path}", flush=True)
-    print(f"[v7_controller] exemplars={'on' if args.enable_exemplars else 'off'}", flush=True)
-    print(f"[v7_controller] evidence_skip={'on' if args.enable_evidence_skip else 'off'}", flush=True)
+    print(
+        f"[v7_controller] exemplars={'on' if args.enable_exemplars else 'off'}",
+        flush=True,
+    )
+    print(
+        f"[v7_controller] evidence_skip={'on' if args.enable_evidence_skip else 'off'}",
+        flush=True,
+    )
     print(
         f"[v7_controller] selector_quota_realization={cfg.selector.quota_realization} "
         f"mode_window_k={cfg.selector.mode_window_k} "
@@ -4310,22 +4496,23 @@ def main(
         archive, target_id=target.target_id
     )
     controller_started_monotonic = time.monotonic()
-    # Prefetch queue (2026-05-28): candidate_ids planned-but-not-yet-dispatched.
-    # Kept primed (~one pool's worth) so a freed slot dispatches instantly
-    # while the next plan refills it off the GPU critical path.
+    # Keep selected jobs queued so a free worker can start while planning replenishes
+    # the queue.
     pending: list[str] = []
-    chain_backfill_seen: set[str] = set()  # L2: chains ever queued for idle-slot backfill
-    dispatch_retries: dict[str, int] = {}  # review #7: per-candidate transient-dispatch-failure retry count
-    dispatch_defer_seen: set[str] = set()  # one audit row per candidate+temporary cap reason
-    # F5b: last tick's state; deep_stall throttles the chain lane. Seed from the
-    # latest archived EvidenceSummary (append order) so a controller RESTART on a
-    # target already in deep_stall throttles the chain lane on tick 1, not one
-    # tick late (review-found LOW; archive empty on a fresh run → None).
+    chain_backfill_seen: set[
+        str
+    ] = set()  # Evaluation candidates already queued for idle-slot backfill.
+    dispatch_retries: dict[
+        str, int
+    ] = {}  # Transient dispatch retry counts per candidate.
+    dispatch_defer_seen: set[
+        str
+    ] = set()  # One audit row per candidate and temporary capacity limit.
+    # Restore campaign state so resumed dispatch applies the current evaluation
+    # throttle.
     prior_evidence_summaries = list(archive.iter_records(EvidenceSummary))
     latest_state: str | None = (
-        prior_evidence_summaries[-1].state_label
-        if prior_evidence_summaries
-        else None
+        prior_evidence_summaries[-1].state_label if prior_evidence_summaries else None
     )
     state_probe_cache_key: tuple[
         int, int, int, int, tuple[tuple[str, int, int], ...]
@@ -4342,12 +4529,13 @@ def main(
         resume_checkpoint is not None
         and str(resume_checkpoint.get("target_id")) == target.target_id
     ):
-        checkpoint_state = (resume_checkpoint.get("evidence") or {}).get(
-            "state_label"
-        )
+        checkpoint_state = (resume_checkpoint.get("evidence") or {}).get("state_label")
         if checkpoint_state:
             latest_state = str(checkpoint_state)
-    print(f"[v7_controller] target={target.target_id} start={time.strftime('%Y-%m-%dT%H:%M:%SZ')}", flush=True)
+    print(
+        f"[v7_controller] target={target.target_id} start={time.strftime('%Y-%m-%dT%H:%M:%SZ')}",
+        flush=True,
+    )
     print(f"[v7_controller] archive={args.archive_root}", flush=True)
     print(f"[v7_controller] vLLM={args.vllm_base_url}", flush=True)
     print(
@@ -4362,17 +4550,9 @@ def main(
             flush=True,
         )
 
-    # Event-driven controller (2026-05-27, plan §22.8.6): replaces the prior
-    # round-bounded batch loop. The old loop dispatched up to n_slots workers
-    # concurrently but then blocked on `proc.wait()` for ALL of them before
-    # planning the next round — meaning a 5-min ProteinMPNN running alongside
-    # a 90-min BindCraft left its GPU idle for ~85 min. The event-driven
-    # version maintains a slot pool, reaps completions as they happen, and
-    # plans+dispatches for whichever slots are free. Replaces the §2 async
-    # daemon "fixed batch" anti-pattern called out in plan §-1.
-    pool = [
-        _WorkerSlot(slot_id=i, gpu_id=g) for i, g in enumerate(worker_gpus)
-    ]
+    # Reap each completed worker independently and refill free slots while other jobs
+    # continue.
+    pool = [_WorkerSlot(slot_id=i, gpu_id=g) for i, g in enumerate(worker_gpus)]
     dispatch_candidate = partial(
         _dispatch_candidate_to_gpu,
         runtime_paths=active_runtime_paths,
@@ -4407,9 +4587,10 @@ def main(
             )
             break
         completed_iterations += 1
-        elapsed_h = elapsed_offset_h + (
-            time.monotonic() - controller_started_monotonic
-        ) / 3600.0
+        elapsed_h = (
+            elapsed_offset_h
+            + (time.monotonic() - controller_started_monotonic) / 3600.0
+        )
         if elapsed_h >= args.max_wall_h:
             print(
                 f"[v7_controller] max wall reached ({elapsed_h:.2f} h); "
@@ -4488,16 +4669,11 @@ def main(
         progress_checkpoint_at = checkpoint_result.last_checkpoint_at
         latest_state = checkpoint_result.latest_state
 
-        # 2. PREFETCH DISPATCH (2026-05-28): immediately fill any free slot
-        # from the primed `pending` queue — NO planning/LLM on the critical
-        # path. The workers dispatched here run in the background while we
-        # (re)plan below, so a freed GPU does not idle ~30s for run_live_tick.
+        # Dispatch queued jobs before planning so free workers do not wait for LLM
+        # calls.
         free_slots = sum(1 for s in pool if not s.busy)
-        # Per-ROUND chain-refilter reserve budget (A1, 2026-06-13): cap the UNION
-        # of the predispatch + refill reserves so they cannot COMPOUND to fill the
-        # whole pool and transiently starve fresh generation under a chronic
-        # backlog. Budget leaves >=1 pool slot for fresh generation per round;
-        # reserved_this_round accumulates across both reserve calls below.
+        # Share one evaluation-reserve budget across predispatch and refill, leaving
+        # capacity for generation.
         round_backlog_n = max(
             len(pool),
             _score_conversion_backlog_count(archive, prefer_high_value=True),
@@ -4506,34 +4682,30 @@ def main(
             len(pool),
             backlog_n=round_backlog_n,
         )
-        # F3 (2026-06-18): the deep_stall union clamp is applied AFTER the state
-        # probe below refreshes latest_state (see the clamp just before the
-        # predispatch reserve) so it uses the FRESH deep_stall state and caps the
-        # ENTRY round too — a pre-probe clamp here lagged one round on the
-        # stalled->deep_stall transition and could still reserve 2/round that round.
         reserved_this_round = 0
         if free_slots > 0:
-            # F5b follow-up (2026-06-11): refresh the CURRENT classifier state
-            # before deterministic chain-refilter reserves. The previous code
-            # keyed predispatch reserve throttling on the last archived
-            # EvidenceSummary, so a target that crossed into deep_stall on this
-            # loop could still queue+dispatch one stale auto-chain refilter
-            # before run_live_tick observed the new state. evidence_only runs
-            # the reducer but returns before appending evidence or calling LLMs.
+            # Refresh campaign state before reserving evaluation slots. This
+            # evidence-only probe neither archives a summary nor calls the LLMs.
             _probe_now = time.time()
             _probe_inflight_gpu_h = sum(
                 max(0.0, (_probe_now - s.launched_at) / 3600.0)
-                for s in pool if s.busy and s.launched_at > 0
+                for s in pool
+                if s.busy and s.launched_at > 0
             )
             _probe_tick_id = f"v7probe{max(round_id + 1, 1):03d}"
             try:
                 _probe_result_count = sum(
-                    1 for r in archive.iter_records(ResultRecord)
+                    1
+                    for r in archive.iter_records(ResultRecord)
                     if r.target_id == target.target_id
                 )
                 _probe_busy_count = sum(1 for s in pool if s.busy)
-                _probe_cand_by_id = {c.candidate_id: c for c in archive.iter_records(ActionCandidate)}
-                _probe_pending_family_load = _pending_family_load_summary(pool, pending, _probe_cand_by_id)
+                _probe_cand_by_id = {
+                    c.candidate_id: c for c in archive.iter_records(ActionCandidate)
+                }
+                _probe_pending_family_load = _pending_family_load_summary(
+                    pool, pending, _probe_cand_by_id
+                )
                 # The evidence-only state probe includes in-flight worker GPU-h
                 # in dry-timer classification. Bucket it coarsely so the cache
                 # still avoids churn, but cannot hide a stalled/deep-stall
@@ -4555,7 +4727,8 @@ def main(
                     _probe_summary = state_probe_cache_summary
                 else:
                     _probe_summary = run_live_tick(
-                        archive, target,
+                        archive,
+                        target,
                         tick_id=_probe_tick_id,
                         tick_id_int=round_id + 1,
                         elapsed_wall_h=elapsed_h,
@@ -4571,16 +4744,21 @@ def main(
                     state_probe_cache_at = _probe_now
                     state_probe_cache_summary = _probe_summary
                 latest_state = _probe_summary.get("evidence", {}).get(
-                    "state_label", latest_state)
+                    "state_label", latest_state
+                )
                 _probe_evidence = _probe_summary.get("evidence", {})
                 if latest_state == "deep_stall":
                     _stale_chain_ids = [
                         cid for cid in pending if cid.startswith("chain_")
                     ]
-                    if _has_native_strict_like_pending_refilter(archive) and _stale_chain_ids:
+                    if (
+                        _has_native_strict_like_pending_refilter(archive)
+                        and _stale_chain_ids
+                    ):
                         _stale_chain_ids = _stale_chain_ids[1:]
                     cancelled = _cancel_pending_chain_reserves_for_deep_stall(
-                        archive, pending, _stale_chain_ids, tick_id=_probe_tick_id)
+                        archive, pending, _stale_chain_ids, tick_id=_probe_tick_id
+                    )
                     if cancelled:
                         print(
                             f"  [chain_refilter_predispatch] cancelled "
@@ -4609,11 +4787,8 @@ def main(
                     f"using previous state={latest_state}",
                     flush=True,
                 )
-        # F3 (2026-06-18): clamp the per-round reserve UNION to 1 under deep_stall,
-        # using the POST-probe latest_state so the deep_stall ENTRY round is capped
-        # too (predispatch + refill below each clamp to <=1; this bounds their union
-        # — both reserve calls run before the full re-plan, so this single clamp
-        # covers both). Was the documented 1-slot deep_stall score-conversion floor.
+        # Apply the deep-stall cap to the combined predispatch and refill reserve using
+        # the refreshed state.
         if latest_state == "deep_stall":
             round_reserve_budget = min(round_reserve_budget, 1)
         if free_slots > 0:
@@ -4621,9 +4796,10 @@ def main(
             # LLM/Selector decision. Exception: if accepted diagnostic artifacts
             # are still unscored, canonical score conversion may use that single
             # slot so route evidence is not poisoned as a false zero-SU failure.
-            predispatch_reserve_room, predispatch_score_slot = (
-                _score_conversion_reserve_room(archive, free_slots)
-            )
+            (
+                predispatch_reserve_room,
+                predispatch_score_slot,
+            ) = _score_conversion_reserve_room(archive, free_slots)
             predispatch_reserved = _queue_chain_refilter_reserve(
                 archive,
                 pending,
@@ -4668,9 +4844,14 @@ def main(
         _cand_by_id = {c.candidate_id: c for c in archive.iter_records(ActionCandidate)}
         try:
             dispatched_pre = _dispatch_pending_to_free_slots(
-                pool, pending, _cand_by_id,
-                archive=archive, target=target, target_pdb=args.target_pdb,
-                archive_root=args.archive_root, round_id=round_id,
+                pool,
+                pending,
+                _cand_by_id,
+                archive=archive,
+                target=target,
+                target_pdb=args.target_pdb,
+                archive_root=args.archive_root,
+                round_id=round_id,
                 dispatch_fn=dispatch_candidate,
                 dispatch_retries=dispatch_retries,
                 dispatch_defer_seen=dispatch_defer_seen,
@@ -4691,7 +4872,8 @@ def main(
         if queue_room > 0:
             try:
                 _completed_for_prefetch = sum(
-                    1 for r in archive.iter_records(ResultRecord)
+                    1
+                    for r in archive.iter_records(ResultRecord)
                     if r.target_id == target.target_id
                 )
             except Exception:  # noqa: BLE001
@@ -4761,21 +4943,26 @@ def main(
                 flush=True,
             )
             if refill_n > 0:
-                # R1-2 (2026-06-11): in-flight GPU-h of currently-running slots
-                # (each slot = 1 GPU), so the dry timer counts compute spent since
-                # the last SU but not yet in a completed ResultRecord. Idle slots
-                # contribute 0.
+                # Include running-worker compute in the time since the last new SU; idle
+                # workers contribute zero.
                 _now = time.time()
                 inflight_gpu_h = sum(
                     max(0.0, (_now - s.launched_at) / 3600.0)
-                    for s in pool if s.busy and s.launched_at > 0
+                    for s in pool
+                    if s.busy and s.launched_at > 0
                 )
                 try:
-                    _cand_by_id_for_load = {c.candidate_id: c for c in archive.iter_records(ActionCandidate)}
-                    _pending_family_load = _pending_family_load_summary(pool, pending, _cand_by_id_for_load)
+                    _cand_by_id_for_load = {
+                        c.candidate_id: c for c in archive.iter_records(ActionCandidate)
+                    }
+                    _pending_family_load = _pending_family_load_summary(
+                        pool, pending, _cand_by_id_for_load
+                    )
                     summary = run_live_tick(
-                        archive, target,
-                        tick_id=tick_id, tick_id_int=round_id,
+                        archive,
+                        target,
+                        tick_id=tick_id,
+                        tick_id_int=round_id,
                         elapsed_wall_h=elapsed_h,
                         remaining_wall_h=max(0.0, args.max_wall_h - elapsed_h),
                         pending_children=n_busy,
@@ -4785,22 +4972,23 @@ def main(
                         pending_family_load=_pending_family_load,
                     )
                 except Exception as e:  # noqa: BLE001
-                    print(f"  [live_tick exception] {type(e).__name__}: {e}", flush=True)
+                    print(
+                        f"  [live_tick exception] {type(e).__name__}: {e}", flush=True
+                    )
                     time.sleep(60)
                     continue
-                # F5b: carry this tick's state forward — deep_stall throttles the
-                # deterministic chain lane (reserve + idle backfill). run_live_tick
-                # returns a DICT (not the EvidenceSummary object), so read the
-                # nested key, matching the access at line ~2659. (A getattr here
-                # silently no-op'd the whole throttle — caught in final review.)
+                # Carry the returned campaign state into subsequent evaluation
+                # throttling.
                 latest_state = summary.get("evidence", {}).get(
-                    "state_label", latest_state)
+                    "state_label", latest_state
+                )
                 if latest_state == "deep_stall" and reserved_ids:
                     cancel_ids = list(reserved_ids)
                     if _has_native_strict_like_pending_refilter(archive):
                         cancel_ids = cancel_ids[1:]
                     cancelled = _cancel_pending_chain_reserves_for_deep_stall(
-                        archive, pending, cancel_ids, tick_id=tick_id)
+                        archive, pending, cancel_ids, tick_id=tick_id
+                    )
                     if cancelled:
                         print(
                             f"  [chain_refilter_reserve] cancelled "
@@ -4809,8 +4997,10 @@ def main(
                             flush=True,
                         )
                 new_ids = [
-                    L.candidate_id for L in archive.iter_records(LaunchDecision)
-                    if L.tick_id == tick_id and L.status == "launched"
+                    L.candidate_id
+                    for L in archive.iter_records(LaunchDecision)
+                    if L.tick_id == tick_id
+                    and L.status == "launched"
                     and L.candidate_id not in reserved_ids
                 ]
                 for cid in new_ids:
@@ -4819,16 +5009,10 @@ def main(
                     if cid not in pending:
                         pending.append(cid)
                 planned = len(new_ids)
-                # L2 backfill (2026-05-30): append feasible unlaunched chain
-                # refilter candidates to the END of pending so they fill ONLY
-                # slots the selector left free. The reserved lane above handles
-                # the non-idle starvation case; this still uses leftover slack.
-                # F4/F5b: on deep_stall, do NOT backfill idle slots with refilters
-                # of a dead lineage — leave them for the next tick's explore-heavy
-                # mixture (fresh cross-paradigm starts) instead of grinding GPU-h.
+                # Backfill only unused queue capacity. Deep-stall throttling leaves
+                # capacity for subsequent generation.
                 _bf_cand_by_id = {
-                    c.candidate_id: c
-                    for c in archive.iter_records(ActionCandidate)
+                    c.candidate_id: c for c in archive.iter_records(ActionCandidate)
                 }
                 _score_lane_occupied = _busy_score_conversion_count(pool) + sum(
                     1
@@ -4856,8 +5040,11 @@ def main(
                         source="chain_backfill",
                         why="idle-slot chain refilter backfill (G-032)",
                     )
-                    print(f"  [chain_backfill] queued {len(bf)} chain refilter(s) "
-                          f"for idle slots", flush=True)
+                    print(
+                        f"  [chain_backfill] queued {len(bf)} chain refilter(s) "
+                        f"for idle slots",
+                        flush=True,
+                    )
                 state = summary.get("evidence", {}).get("state_label", "?")
             else:
                 state = "chain_refilter_reserved"
@@ -4867,16 +5054,21 @@ def main(
                 flush=True,
             )
 
-        # 3b. Dispatch any STILL-free slots from the freshly-refilled queue
-        # (covers cold start: first iteration's queue is empty → plan → fill;
-        # also dispatches L2 chain-backfill that was just appended to pending).
+        # Dispatch free slots after planning replenishes the queue.
         if pending:
-            _cand_by_id = {c.candidate_id: c for c in archive.iter_records(ActionCandidate)}
+            _cand_by_id = {
+                c.candidate_id: c for c in archive.iter_records(ActionCandidate)
+            }
             try:
                 dispatched_post = _dispatch_pending_to_free_slots(
-                    pool, pending, _cand_by_id,
-                    archive=archive, target=target, target_pdb=args.target_pdb,
-                    archive_root=args.archive_root, round_id=round_id,
+                    pool,
+                    pending,
+                    _cand_by_id,
+                    archive=archive,
+                    target=target,
+                    target_pdb=args.target_pdb,
+                    archive_root=args.archive_root,
+                    round_id=round_id,
                     dispatch_fn=dispatch_candidate,
                     dispatch_retries=dispatch_retries,
                     dispatch_defer_seen=dispatch_defer_seen,
@@ -4917,9 +5109,6 @@ def main(
         auto_chain_sequence=chain_seq_ref,
         dependencies=worker_supervision,
     )
-    # ^^ end drain. Legacy batch dispatch deleted 2026-05-27 (event-driven
-    # rewrite). The old block below is gone; what remains is the final
-    # status print.
 
     print(f"[v7_controller] done at {time.strftime('%Y-%m-%dT%H:%M:%SZ')}", flush=True)
 

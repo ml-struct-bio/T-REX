@@ -330,16 +330,54 @@ def test_decision_trace_joins_auditable_fields(tmp_path: Path) -> None:
 def test_local_markdown_links_resolve() -> None:
     root = Path(__file__).resolve().parents[2]
     missing: list[str] = []
-    for document in root.rglob("*.md"):
-        if any(part in {".git", "build", "slurm_logs"} for part in document.parts):
-            continue
+    documents = list(root.glob("*.md")) + [root / "external/README.md"]
+    for directory in ("docs", "examples", "benchmarks", ".github"):
+        documents.extend((root / directory).rglob("*.md"))
+    for document in documents:
         for destination in re.findall(r"\]\(([^)]+)\)", document.read_text()):
-            target = destination.strip().split("#", 1)[0]
-            if not target or target.startswith(("http://", "https://", "mailto:")):
+            target, _, anchor = destination.strip().partition("#")
+            if target.startswith(("http://", "https://", "mailto:")):
                 continue
-            if not (document.parent / target).resolve().exists():
+            resolved = (document.parent / target).resolve() if target else document
+            if not resolved.exists():
                 missing.append(f"{document.relative_to(root)} -> {destination}")
+                continue
+            if anchor and resolved.suffix == ".md":
+                anchors: set[str] = set()
+                occurrences: dict[str, int] = {}
+                in_fence = False
+                for line in resolved.read_text().splitlines():
+                    if line.lstrip().startswith(("```", "~~~")):
+                        in_fence = not in_fence
+                    if in_fence:
+                        continue
+                    heading = re.match(r"^#{1,6}\s+(.+?)\s*#*\s*$", line)
+                    if heading:
+                        slug = re.sub(r"[^\w\- ]", "", heading[1].lower()).replace(" ", "-")
+                        count = occurrences.get(slug, 0)
+                        occurrences[slug] = count + 1
+                        anchors.add(f"{slug}-{count}" if count else slug)
+                if anchor not in anchors:
+                    missing.append(f"{document.relative_to(root)} -> missing anchor {destination}")
     assert missing == []
+
+
+def test_distribution_hygiene_rejects_cached_external_and_private_members() -> None:
+    root = Path(__file__).resolve().parents[2]
+    path = root / "scripts/check_distribution.py"
+    spec = importlib.util.spec_from_file_location("trex_distribution_check", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    allowed = [".env.example", "external/README.md", "external/patches/dependencies.patch",
+               "trex/data/external/patches/dependencies.patch", "trex/tests/test_archive.py"]
+    forbidden = ["internal/review.md", "audit/run.log", "reviews/notes.md",
+                 "docs/internal/checks.md", "external/BindCraft/README.md", "external/OtherBackend/docs/setup.md",
+                 ".env", ".env.assets", ".venv-serving/bin/python", "slurm_logs/job.out",
+                 "trex/__pycache__/archive.pyc", "../private.key"]
+    assert module.unexpected_members(allowed, wheel=False) == []
+    assert module.unexpected_members(allowed + forbidden, wheel=False) == forbidden
+    assert module.unexpected_members(allowed, wheel=True) == ["trex/tests/test_archive.py"]
 
 
 def test_behavioral_parity_approved_divergences_are_fail_closed() -> None:
@@ -352,6 +390,12 @@ def test_behavioral_parity_approved_divergences_are_fail_closed() -> None:
 
     approved = module.APPROVED_STANDALONE_DIVERGENCES
     assert set(approved) == {
+        "diagnosis_outcome.py",
+        "candidate_builder.py",
+        "critic_guard.py",
+        "lifecycle.py",
+        "prompts.py",
+        "unified_reasoner.py",
         "foldseek_clusterer.py",
         "output_parsers/af2_refilter.py",
         "sequence_clusterer.py",

@@ -65,7 +65,7 @@ def write_campaign_provenance(
     executed_source_root = Path(__file__).resolve().parents[2]
     if runtime_paths.repo_root.resolve() != executed_source_root:
         raise ValueError(
-            "backends.repo_root must identify the T-ReX source executing this "
+            "backends.repo_root must identify the T-REX source executing this "
             f"campaign: running={executed_source_root} "
             f"configured={runtime_paths.repo_root.resolve()}"
         )

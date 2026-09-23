@@ -14,12 +14,12 @@ set -euo pipefail
 REPO="${TREX_REPO_ROOT:-${SLURM_SUBMIT_DIR:-}}"
 PYTHON="${TREX_VALIDATION_PYTHON:-${TREX_CONTROLLER_PYTHON:-python}}"
 TEST_PYTHON="${TREX_TEST_PYTHON:-${PYTHON}}"
-: "${REPO:?set TREX_REPO_ROOT or submit from the T-ReX root}"
+: "${REPO:?set TREX_REPO_ROOT or submit from the T-REX root}"
 : "${TREX_TARGET_ASSET_ROOT:?set TREX_TARGET_ASSET_ROOT}"
 : "${TREX_QWEN_MODEL_PATH:?set TREX_QWEN_MODEL_PATH}"
 
 [[ -r "${REPO}/trex/controller.py" ]] || {
-  echo "[FATAL] invalid T-ReX source checkout: ${REPO}" >&2
+  echo "[FATAL] invalid T-REX source checkout: ${REPO}" >&2
   exit 2
 }
 [[ -x "${PYTHON}" ]] || {
@@ -50,7 +50,7 @@ if [[ -n "${TREX_MMSEQS_BIN:-}" ]]; then
   export PATH="$(dirname "${TREX_MMSEQS_BIN}"):${PATH}"
 fi
 
-TARGETS="${TREX_PREFLIGHT_TARGETS:-cd45,betv1,cbago,her2aav,sc2rbd,il7ra,pdl1,vegfa,il17a,tnfalpha}"
+TARGETS="${TREX_PREFLIGHT_TARGETS:-cd45,betv1,cbago,her2aav,il7ra,pdl1,tnfalpha,trka}"
 IFS=, read -r -a TARGET_ARRAY <<< "${TARGETS}"
 [[ "${#TARGET_ARRAY[@]}" -gt 0 ]] || {
   echo "[FATAL] TREX_PREFLIGHT_TARGETS is empty" >&2
@@ -77,11 +77,10 @@ done
 "${TEST_PYTHON}" -m trex.tests.policy_contracts \
   --repo-root "${REPO}" \
   --out "${TMPDIR:-/tmp}/trex_deterministic_smoke.json"
-"${TEST_PYTHON}" "${REPO}/benchmarks/paper_7target_144h/verify.py"
 
-bash -n "${REPO}/slurm/trex_per_target_node.slurm"
+bash -n "${REPO}/slurm/T-REX.slurm"
 bash -n "${REPO}/slurm/publication_preflight.slurm"
 bash -n "${REPO}/scripts/run_controller.sh"
 git -C "${REPO}" diff --check
 
-echo "T-ReX publication preflight passed."
+echo "T-REX publication preflight passed."

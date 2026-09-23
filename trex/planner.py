@@ -1,8 +1,4 @@
-"""Planner LLM via vLLM-served Qwen3.6-27B-FP8 (V5/V6.3 production model).
-
-One call per tick. JSON-only output. Parse + schema validation +
-confidence-based fallback. See plan §10.
-"""
+"""Planner calls, structured-output validation, and hypothesis materialization."""
 
 from __future__ import annotations
 
@@ -43,7 +39,7 @@ MAX_PLANNER_CARDS = 4
 PLANNER_MODES = ("exploit", "rescue", "explore")
 
 
-_PLANNER_CORE_CONTRACT = """You are the Planner for T-ReX, a budgeted protein-binder design controller.
+_PLANNER_CORE_CONTRACT = """You are the Planner for T-REX, a budgeted protein-binder design controller.
 
 Task: from the latest EvidenceSummary, propose 1-4 testable HypothesisCards that
 increase structurally-unique strict successes per live WORKER-WALL GPU-hour. Do not use
@@ -290,11 +286,9 @@ def _build_planner_system() -> str:
 PLANNER_SYSTEM = _build_planner_system()
 
 def _render_diagnostic_lever_map() -> str:
-    """Append the axis→remediation-lever map to the system prompt (SSOT =
-    evidence_reducer.DIAGNOSTIC_AXIS_REMEDIATION). v7_3: the prior single-tier
-    diagnostics were cited in only ~0.9% of cards because 9/12 axes have no lever
-    and the prompt never named the one real lever (BindCraft weights_*). This
-    block names every actionable lever and marks the rest corroboration-only."""
+    """Render diagnostic remediation guidance from
+    evidence_reducer.DIAGNOSTIC_AXIS_REMEDIATION.
+    """
     from .evidence_reducer import DIAGNOSTIC_AXIS_REMEDIATION
     levered = [
         f"    {a} -> {lev}"
@@ -441,19 +435,15 @@ PLANNER_JSON_SCHEMA = {
                             "action_implication": {"type": "string"},
                         },
                     },
-                    "ttl_ticks": {"type": "integer", "minimum": 1, "maximum": 20},  # Q30: cap raised for async
+                    "ttl_ticks": {"type": "integer", "minimum": 1, "maximum": 20},
                 },
             },
         },
-        # `missing_candidate_requests` removed 2026-05-26 PM (plan §10.6).
     },
 }
 
 
 VALID_ACTION_FAMILIES = {
-    # B-013 fix (2026-05-26): align with capability_registry cleanup.
-    # Unsupported legacy Complexa aliases are not valid action families. If
-    # the LLM still proposes them they will be rejected here as malformed cards.
     "complexa_beam",
     "complexa_best_of_n",
     "complexa_fk_steering",
@@ -493,15 +483,8 @@ def _strip_target_identity_for_prompt(obj: Any) -> Any:
 
 
 def build_evidence_for_prompt(evidence: EvidenceSummary) -> dict[str, Any]:
-    """Compact, LLM-friendly view of EvidenceSummary.
-
-    §22.8.5: previously dropped any key whose value was None / [] / {} / "".
-    That removed `method_health` entries with `attempts=0` (so the LLM
-    could not see "this family has never been tried" — directly
-    weakening the explore-vs-exploit signal). Now: drop only top-level
-    None / "" — always preserve `method_health`, `axis_stats`,
-    `joint_patterns`, `recipes`, and other dict/list fields the
-    Planner is instructed to cite (planner system prompt §10).
+    """Build a compact EvidenceSummary view while retaining empty evidence collections.
+    Empty collections distinguish unobserved families from omitted context.
     """
     d = _strip_target_identity_for_prompt(to_jsonable(evidence))
     KEEP_ALWAYS = {
@@ -513,11 +496,9 @@ def build_evidence_for_prompt(evidence: EvidenceSummary) -> dict[str, Any]:
         "diagnostic_chain_backlog", "refilter_role_health",
         "production_panel_selected_ids", "production_panel_diversity_bins",
         "production_panel_gap_reasons", "production_near_miss_ids",
-        "stuck_lineage_roots",  # review #5: keep dead-lineage negative evidence
+        "stuck_lineage_roots",
     }
-    # 2026-06-01: route_health is now archive-derived in live_tick, so keep it
-    # when populated. reduce_evidence direct callers may still get the old
-    # all-open stub; hide that exact block to avoid anchoring the Planner.
+    # Keep populated route evidence but omit the all-open placeholder.
     EXCLUDE_WHILE_STUB = {"llm_health"}
 
     def _is_route_stub(value: object) -> bool:
@@ -539,13 +520,8 @@ def build_evidence_for_prompt(evidence: EvidenceSummary) -> dict[str, Any]:
     # empty dicts) so it is surfaced ONLY on ticks where refold probes ran.
     if not view.get("refold_probe_outcomes"):
         view.pop("refold_probe_outcomes", None)
-    # v7_3 form fixes (LLM legibility): (a) rename the name-lie key for the LLM
-    # view — the schema field worker_gpu_h_last_3_ticks actually carries the full
-    # scored-window GPU-h sum (~5 ticks), so an LLM dividing by it trusting
-    # "3 ticks" mis-rates; the SCHEMA field name is unchanged for replay
-    # compatibility. (b) round floats to 4 decimal places to drop false-precision
-    # tails (su_per_gpu_h_recent=0.36363636363636365 → 0.3636); every pipeline
-    # metric is O(0.01)-O(100) so 4 decimals preserves >=4 significant figures.
+    # Expose the actual compute-window meaning in the prompt while preserving archive
+    # field names. Round displayed floats to four decimal places.
     if "worker_gpu_h_last_3_ticks" in view:
         view["worker_gpu_h_window"] = view.pop("worker_gpu_h_last_3_ticks")
     view["diagnostic_driver_tldr"] = diagnostic_driver_tldr_for_prompt(evidence)
@@ -713,12 +689,11 @@ def _annotate_parent_bound_method_health(view: dict[str, Any]) -> dict[str, Any]
 
 
 def _collapse_dedup_provenance(view: dict[str, Any]) -> dict[str, Any]:
-    """Collapse the ~14 dedup/provenance status scalars into ONE `dedup_trust`
-    key (form audit). On a healthy tick these are pure noise that dilutes the
-    decision signals; emit `dedup_trust: "ok"`. Only when SU dedup is actually
-    degraded (so the planner should distrust the SU numbers) do we surface the
-    non-trivial degraded fields. Removes ~13 keys on a healthy tick with zero
-    information loss for the decision."""
+    """Summarize deduplication provenance under a single dedup_trust key.
+
+    Use "ok" when trusted; otherwise include the degraded fields needed to interpret
+    SU evidence.
+    """
     prov = {k: view.pop(k) for k in _DEDUP_PROVENANCE_KEYS if k in view}
     if not prov:
         return view
@@ -768,12 +743,11 @@ def _collapse_dedup_provenance(view: dict[str, Any]) -> dict[str, Any]:
 
 
 def _trim_axis_noise(view: dict[str, Any]) -> dict[str, Any]:
-    """Drop inert/duplicate axis fields that pad the prompt (form audit): the
-    median_calibrated that duplicates median_raw under 'provisional' calibration,
-    and the two-tier fields (pass/quality_threshold, below_accept_count) on the
-    STRICT axis_stats block where they are always null/0. Keeps every meaningful
-    value — only removes constants that drown the real signals (e.g. a real
-    below_accept_count>0 among 19 below_accept_count:0)."""
+    """Remove redundant or unset axis fields from the LLM view.
+
+    Omit median_calibrated when it duplicates median_raw under provisional
+    calibration, and omit unused acceptance/quality fields on strict axes.
+    """
     for block in ("axis_stats", "diagnostic_axis_stats"):
         stats = view.get(block)
         if not isinstance(stats, dict):
@@ -800,8 +774,6 @@ def _round_floats_for_prompt(obj: Any, ndigits: int = 4) -> Any:
     if isinstance(obj, list):
         return [_round_floats_for_prompt(v, ndigits) for v in obj]
     return obj
-
-
 
 
 def _short_route_id(strategy_key: Any) -> str | None:
@@ -992,7 +964,7 @@ def compact_route_value_for_prompt(row: Any, *, target_dry_gpu_h: float = 0.0) -
     return {k: v for k, v in compact.items() if v not in (None, [], {}, "")}
 
 
-# Backward-compatible alias for downstream notebooks and historical tests.
+# Compatibility alias for downstream callers.
 _compact_route_value_row = compact_route_value_for_prompt
 
 
@@ -1131,7 +1103,6 @@ def _compact_prompt_view(view: dict[str, Any]) -> dict[str, Any]:
     return view
 
 
-
 def diagnostic_driver_tldr(ev: EvidenceSummary) -> str:
     """Structured diagnostic-driver digest used in both JSON evidence and TL;DR."""
     diag_stats = getattr(ev, "diagnostic_axis_stats", {}) or {}
@@ -1205,7 +1176,6 @@ def diagnostic_driver_tldr(ev: EvidenceSummary) -> str:
         return f"error:{type(exc).__name__}"
 
 
-
 def diagnostic_driver_tldr_for_prompt(ev: EvidenceSummary) -> str:
     """Return the archived diagnostic digest when available, else compute it.
 
@@ -1220,12 +1190,7 @@ def diagnostic_driver_tldr_for_prompt(ev: EvidenceSummary) -> str:
 
 
 def evidence_tldr(ev: EvidenceSummary) -> str:
-    """Compact human-readable digest of the decision-critical signals, prepended
-    to the prompt so the LLM does not have to reassemble the 5-tuple from a deep
-    17KB alphabetical JSON (the form audit found state_label at 76% depth, the
-    SU objective at 75%, the Supervisor's binding clamp at 98%). Duplicates NO
-    data — every value is also in the JSON below; it just surfaces it once, up
-    top, with units."""
+    """Summarize decision-relevant evidence with units at the start of the prompt."""
     from collections import Counter
     p: list[str] = [f"state={ev.state_label}"]
     p.append(f"run_SU={ev.run_su_count}(+{ev.run_su_count_delta} recent)")
@@ -1266,8 +1231,6 @@ def evidence_tldr(ev: EvidenceSummary) -> str:
     obj_total = getattr(ev, "run_su_per_worker_gpu_h_total", None)
     if obj_total is not None:
         p.append(f"route_feedback_SU/completed-worker-GPUh_total={obj_total:.3g}")
-    # F5: plateau DURATION since the last new SU — so the LLM sees HOW LONG the
-    # run has been dry (not just the binary state). Surface only once it is dry.
     gph_dry = getattr(ev, "gpu_h_since_last_su", None)
     if gph_dry is not None and gph_dry > 0:
         t_dry = getattr(ev, "ticks_since_last_su", None)
@@ -1334,7 +1297,7 @@ def evidence_tldr(ev: EvidenceSummary) -> str:
     head = "TLDR (units: pLDDT 0-100; iPAE/ipTM/ipsae/min_ipae 0-1; binder_pLDDT_avg 0-1; " \
            "interface_dG REU; buried_sasa A^2; hotspot_rmsd A; boltzgen pae raw): " \
            + " | ".join(p)
-    # prototype #3: surface which diagnosis→remediation actually paid off
+    # Expose observed outcomes of attempts to improve blocking measurements.
     outcomes = getattr(ev, "diagnosis_outcomes", None)
     if outcomes:
         from .diagnosis_outcome import format_diagnosis_outcomes_tldr
@@ -1357,10 +1320,8 @@ def evidence_tldr(ev: EvidenceSummary) -> str:
         if ex:
             seg += " | structure_limited_parents=" + ",".join(ex)
         head += "\n" + seg
-    # review #5 (2026-06-13): a PROMINENT "do not repeat unless justified" block so
-    # negative evidence (cost + zero-yield + dead lineages) is impossible to miss.
-    # The raw data already lives in method_health / stuck_lineage_roots but was
-    # scattered deep in the JSON; surface the actionable subset in the header.
+    # Surface nonproductive routes and exhausted lineages alongside the detailed
+    # evidence.
     def _mh(h, k, d=0):
         v = h.get(k, d) if isinstance(h, dict) else getattr(h, k, d)
         return d if v is None else v
@@ -1454,12 +1415,7 @@ def evidence_tldr(ev: EvidenceSummary) -> str:
 
 
 def _hypothesis_outcomes_tldr(active_hypotheses: list[dict[str, Any]]) -> str:
-    """#6 (2026-06-13): a compact post-hoc hypothesis scoreboard. The lifecycle
-    already advances each card's status (supported/contradicted/retired) + support
-    /contradiction points from returned descendants and they ARE in the JSON, but
-    were buried — surface them in the header so a CONTRADICTED/RETIRED hypothesis
-    is not silently re-proposed and a SUPPORTED one is built on. (Per-axis achieved
-    magnitudes are separately carried by diagnosis_outcomes.)"""
+    """Summarize hypothesis status and accumulated feedback for subsequent planning."""
     rows = []
     for h in active_hypotheses or []:
         st = h.get("status")
@@ -1484,21 +1440,7 @@ def build_user_prompt(
     available_families: list[str] | None = None,
     recent_critic_flags: list[str] | None = None,
 ) -> str:
-    # B-010 fix (2026-05-26): inject the actual allowed_params schema. The
-    # system prompt references `allowed_params_per_family` as if it would be
-    # present in the user payload, but no caller injected it — the LLM was
-    # left guessing param names and consistently hallucinated keys like
-    # `num_outputs`, `steering_weight`, `c_puct` that aren't in any family's
-    # allowed_params. Without this, every config_delta got partial- or fully
-    # dropped at the validator and Complexa ran with default config.
-    #
-    # NEW-1 fix (2026-05-26): filter the schema by current-cluster
-    # availability. The earlier version exposed all registered families to
-    # the LLM regardless of UNAVAILABLE_THIS_CLUSTER, so the planner spent
-    # most of its tick-1 hypothesis budget on families (proteinmpnn_redesign,
-    # boltzgen) that were always rejected at feasibility. `available_families`
-    # is computed by the caller (live_tick) by combining registry's
-    # `feasible_families()` with `cfg.builder.unavailable_backends_override`.
+    # Supply allowed settings only for currently available families.
     from .capability_registry import (
         default_registry,
         family_eval_budget_schema_for_prompt,
@@ -1510,13 +1452,8 @@ def build_user_prompt(
     budget_schema = family_eval_budget_schema_for_prompt(
         default_registry(), families=available_families
     )
-    # fix20 #4b (2026-05-26): render the family role metadata from the
-    # registry so the per-tick prompt always reflects current `role`,
-    # `requires_parent_pdb`, and `outputs_diagnostic_only` flags. The
-    # static role narrative in the system prompt explains *how* to use
-    # each role; this dynamic block tells the LLM *which family is which*
-    # without anyone having to keep the system prompt in sync with the
-    # registry.
+    # Render family roles from the registry so prompt metadata matches feasibility
+    # checks.
     reg_now = default_registry()
     family_role_table: dict[str, dict[str, object]] = {}
     for fam in sorted(available_families):
@@ -1583,18 +1520,9 @@ def build_user_prompt(
             "transparent scheduling prior, not as evidence that any family should "
             "win this target."
         )
-    # D-feedback (2026-05-26): if the Critic raised flags about the previous
-    # tick's hypotheses, surface them so the LLM can either correct course or
-    # justify continuing. Flags are advisory — they don't block the next
-    # proposal, but ignoring them yields lower self-confidence in our audit.
+    # Expose previous advisory flags for consideration without blocking proposals.
     if recent_critic_flags:
         payload["recent_critic_flags_last_tick"] = list(recent_critic_flags)
-        # §22.8.5 tone-down (2026-05-26 PM): plan §22.3 promised the Critic
-        # is informational audit only. Earlier wording ("Either address each
-        # flag in this tick's claims OR provide a justification") made the
-        # Planner spend slot-budget defending instead of exploring, turning
-        # the Critic into a de-facto soft veto. Reworded to "consider" so
-        # the LLM can weigh the flags against evidence on equal footing.
         payload["instructions"] = payload["instructions"] + (
             " The Critic LLM raised the listed flags about your previous "
             "hypotheses. These are advisory observations, not directives. "
@@ -1603,8 +1531,6 @@ def build_user_prompt(
             "the evidence has shifted or the flag was speculative, your new "
             "hypotheses may diverge from it without justification."
         )
-    # v7_3: prepend a one-line TL;DR so the decision 5-tuple is the FIRST thing
-    # the LLM reads, not buried 75% deep in the sorted JSON (form audit).
     head = evidence_tldr(evidence)
     _hyp_line = _hypothesis_outcomes_tldr(active_hypotheses)
     if _hyp_line:
@@ -1660,8 +1586,7 @@ def _coerce_legacy_shape(obj: dict) -> dict:
     obj.setdefault("abstain", False)
     obj.setdefault("confidence", 0.5)
     obj.setdefault("rationale", "")
-    # Strip any lingering `missing_candidate_requests` an old prompt or
-    # legacy LLM trace may still emit — MCR was fully removed plan §10.6.
+    # Discard unsupported fields retained in older LLM responses.
     obj.pop("missing_candidate_requests", None)
     if isinstance(obj.get("cards"), list):
         for card in obj["cards"]:
@@ -1779,11 +1704,7 @@ def _validate_schema(
     *,
     allowed_evidence_refs: set[str] | None = None,
 ) -> tuple[bool, str]:
-    """Hand-rolled minimal validator (no jsonschema dep at runtime).
-
-    `missing_candidate_requests` removal note: MCR was fully removed
-    plan §10.6 / 2026-05-26 PM. Top-level required fields drop it.
-    """
+    """Validate the Planner response without a runtime jsonschema dependency."""
     obj = _coerce_legacy_shape(obj)
     for k in ("abstain", "confidence", "cards", "rationale"):
         if k not in obj:
@@ -1841,11 +1762,7 @@ def _validate_schema(
             for kk in ("axis", "direction", "min_relative_deficit_reduction"):
                 if kk not in pc:
                     return False, f"card[{i}].predicted[{j}]:missing:{kk}"
-            # E3 / MEDIUM 3 fix (2026-05-26): JSON schema enum was tightened
-            # to drop "diversity" (it's a preserve_constraint axis, not a
-            # predicted-change axis). Hand-validator was still permissive —
-            # aligned here so a non-strict LLM can't slip "diversity"
-            # through as a predicted-change axis.
+            # Predicted changes must name a qualification measurement.
             if pc["axis"] not in ("pLDDT", "iPAE", "binder_scRMSD"):
                 return False, f"card[{i}].predicted[{j}]:bad_axis"
             if pc["direction"] not in ("increase", "decrease"):
@@ -2110,12 +2027,7 @@ def _repair_planner_schema_drift(
 
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
-    """Coerce a value to float; return `default` if v is None or not numeric.
-
-    This is the defensive guard for `_materialize_cards`. We never trust
-    that an upstream validator coerced fields, because validator + materializer
-    drift is a recurring class of bug in LLM pipelines.
-    """
+    """Coerce a value to float; return default when it is None or not numeric."""
     if v is None:
         return default
     if isinstance(v, (int, float)):
@@ -2214,11 +2126,7 @@ def _materialize_cards(
                 predicted_metric_changes=predicted,
                 preserve_constraints=preserve,
                 recommended_action_families=list(c["recommended_action_families"]),
-                # llm-001 (2026-06-18): a non-numeric ("soon") or out-of-range
-                # ttl_ticks used to crash int() here and kill the ENTIRE tick (the
-                # call is outside call_planner's try) → ~60s GPU idle. ttl_ticks is
-                # not in the prompt's required shape, so drift is rare but fatal.
-                # Coerce defensively via _safe_float and clamp to [1,20]. Q30: 10.
+                # Coerce lifetime defensively and clamp to the supported range.
                 ttl_ticks=max(1, min(20, int(_safe_float(c.get("ttl_ticks"), 10)))),
                 config_delta_suggestions=cds,
                 reasoning_trace=_extract_reasoning_trace(c),
@@ -2230,12 +2138,10 @@ def _materialize_cards(
 def _filter_cards_to_available(
     cards: list[HypothesisCard], available_families: set[str],
 ) -> list[HypothesisCard]:
-    """llm-003 (2026-06-18): trim each card's recommended_action_families to the
-    families actually available this cluster, and drop a card left with none. The
-    schema validator only checks the STATIC VALID_ACTION_FAMILIES, so without this an
-    unavailable-family card becomes an infeasible candidate (zero GPU cost) that
-    still wastes a hypothesis slot, and an all-unavailable card set can idle workers.
-    No-op when every recommended family is available (the common case)."""
+    """Filter card families when a nonempty availability set is supplied.
+
+    Drop cards with no remaining family; an empty availability set leaves cards unchanged.
+    """
     if not available_families:
         return cards
     kept: list[HypothesisCard] = []
@@ -2249,13 +2155,6 @@ def _filter_cards_to_available(
     return kept
 
 
-# `_materialize_mcr` removed 2026-05-26 PM along with the rest of MCR
-# (plan §10.6). The recovered-card path (MCR with an in-registry family
-# converted to a HypothesisCard recommendation) is also gone — the LLM
-# is instead instructed to put in-registry families in
-# `recommended_action_families` directly.
-
-
 # ---------------------------------------------------------------------------
 # Top-level call
 # ---------------------------------------------------------------------------
@@ -2263,16 +2162,11 @@ def _filter_cards_to_available(
 
 @dataclass(frozen=True)
 class PlannerCallConfig:
-    # Model pin: Qwen3.6-27B-FP8 — V5/V6.3 production model, smoke 8691180
-    # passes 10/10 with v4 prompt + parser. 35B-A3B also passes 10/10 (job
-    # 8692375) at ~2.7x latency win, kept as optional sensitivity. Override
-    # via PlannerCallConfig(model="vllm/Qwen/Qwen3.6-35B-A3B-FP8").
     model: str = "vllm/Qwen/Qwen3.6-27B-FP8"
     base_url: str = "http://127.0.0.1:8500/v1"
-    # Live traces hit tokens_out=2048 on schema failures; give the JSON emitter
-    # enough room while keeping the call bounded.
+    # Bound output length while allowing complete structured responses.
     max_tokens: int = 3072
-    enable_thinking: bool = False  # plan §10: thinking ON broke JSON parse in smoke 8667398
+    enable_thinking: bool = False  # Disable model thinking output for the structured-response call.
     confidence_threshold: float = 0.55
     timeout_s: float = 90.0
     prompt_variant: str = "default"  # see trex.prompts.VARIANTS
@@ -2296,13 +2190,8 @@ def call_planner(
     active_hypotheses = active_hypotheses or []
     seed_action_families = seed_action_families or []
     allowed_refs = _allowed_evidence_refs(evidence, active_hypotheses)
-    # Bug A fix (2026-05-30): thread the per-call timeout into the client. Without
-    # this the OpenAI SDK default (~minutes, with retries) applied; since
-    # call_planner is SYNCHRONOUS on the controller's reap loop, a hung vLLM
-    # request would block worker-reaping AND HARD_CEILING kill checks for the full
-    # SDK timeout — idling GPUs and risking a SLURM SIGKILL during the end-of-run
-    # drain. timeout=cfg.timeout_s + bounded retries → on a hang the call raises,
-    # the except below sets valid=False, and the deterministic fallback fires.
+    # Bound LLM latency so model failures return control to worker supervision and
+    # fallback.
     client = create_client(cfg.model, base_url=cfg.base_url,
                            enable_thinking=cfg.enable_thinking,
                            timeout=cfg.timeout_s, max_retries=1)
@@ -2314,7 +2203,7 @@ def call_planner(
         recent_critic_flags=recent_critic_flags,
     )
 
-    # Resolve system prompt by variant; default keeps backwards-compat
+    # Resolve the system prompt for the configured variant.
     base_system_prompt = planner_system_prompt()
     if cfg.prompt_variant == "default":
         system_prompt = base_system_prompt
@@ -2391,10 +2280,7 @@ def call_planner(
     try:
         cards = _materialize_cards(obj, target_id=evidence.target_id, tick_id=tick_id_int)
     except Exception as exc:  # noqa: BLE001
-        # llm-001 (2026-06-18): materializer/validator drift on ANY card field must
-        # degrade to the deterministic fallback, not crash the tick (this call is on
-        # the critical path, outside the client.chat try; an uncaught raise here
-        # propagates to the controller's swallow-and-sleep(60) → freed GPUs idle).
+    # Malformed card fields must activate fallback rather than abort the planning cycle.
         return PlannerOutput(
             valid=False,
             abstain=False,
@@ -2408,9 +2294,7 @@ def call_planner(
     confidence = float(obj.get("confidence") or 0.0)
     abstain = bool(obj.get("abstain"))
 
-    # llm-003 (2026-06-18): the schema validator checks recommended_action_families
-    # against the STATIC VALID_ACTION_FAMILIES, not what is actually available this
-    # cluster, so a card can recommend an unavailable family.
+    # The static schema does not establish current backend availability.
     from .capability_registry import default_registry as _default_registry
     cards = _filter_cards_to_available(
         cards, set(available_families or _default_registry().feasible_families()))

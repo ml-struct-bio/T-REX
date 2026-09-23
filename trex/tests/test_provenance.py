@@ -73,6 +73,21 @@ def test_source_tree_digest_ignores_caches(tmp_path: Path):
     assert n_first == n_second == 1
 
 
+@pytest.mark.parametrize("launch_file", ["slurm/T-REX.slurm", "scripts/submit.sh"])
+def test_source_tree_digest_detects_launch_changes(tmp_path: Path, launch_file: str):
+    package = tmp_path / "trex"
+    package.mkdir()
+    (package / "a.py").write_text("x = 1\n")
+    launcher = tmp_path / launch_file
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/bin/bash\nexit 0\n")
+    first, first_count = source_tree_digest(tmp_path)
+    launcher.write_text("#!/bin/bash\nexit 1\n")
+    second, second_count = source_tree_digest(tmp_path)
+    assert first != second
+    assert first_count == second_count == 2
+
+
 def test_capture_writes_atomic_complete_record(tmp_path: Path, monkeypatch):
     source = tmp_path / "source"
     package = source / "trex"

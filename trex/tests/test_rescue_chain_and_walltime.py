@@ -1,10 +1,4 @@
-"""Regression tests (2026-05-28):
- - Fix A: proteinmpnn_redesign must carry downstream_route_plan=['structure_refilter']
-   so the controller auto-chains its (metric-less) redesigns to AF2 and they
-   produce strict SU. Without it the entire RESCUE mode produced 0 SU.
- - Fix C: a heavy generator must be infeasible when it cannot finish before the
-   wall deadline (don't burn GPU-h on a launch that salvages 0 scored designs).
-"""
+"""Tests for downstream redesign evaluation and remaining-time feasibility."""
 
 from __future__ import annotations
 
@@ -81,7 +75,7 @@ def _recipe_with_rep(rep: str, family: str = "boltzgen") -> Recipe:
     )
 
 
-# --- Fix A: proteinmpnn rescue chain -----------------------------------------
+# ProteinMPNN rescue chain
 
 def test_proteinmpnn_candidate_carries_refilter_route():
     cands = build_candidates([_mpnn_card()], _evidence(), parent_pdb_available=True)
@@ -209,7 +203,7 @@ def test_material_parent_model_refold_can_retry_already_scored_source():
     assert refilters[0].feasibility.all_ok()
 
 
-# --- Fix C: remaining-wall feasibility gate ----------------------------------
+# Remaining-time feasibility gate
 
 def test_heavy_generator_infeasible_near_deadline():
     # bindcraft ~2.5h: with only 2.0h left it cannot finish → infeasible

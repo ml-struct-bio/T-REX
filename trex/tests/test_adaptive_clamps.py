@@ -40,15 +40,12 @@ def test_productive_clamp_loosens_on_structural_collapse():
     assert any("diversity_loosen" in s for s in log)
     # explore was 0.3 — under loosened cap 0.40 → allowed
     assert out["explore"] >= 0.20  # would be capped at 0.20 normally
-    # exploit was 0.7 — under loosened cap 0.65? actually 0.7 > 0.65 so should clamp down
+    # Clamp exploitation to the adjusted upper bound.
     assert out["exploit"] <= 0.65
 
 
 def test_productive_clamp_loosens_on_shallow_panel_coverage():
-    """Shallow panel coverage (< K/2 bins) signals diversity need — but ONLY
-    when panel_live=True. PanelValue@K is deferred in production, so
-    panel_ready_bins_covered is a constant 0; the 2026-05-29 fix gates this
-    trigger behind panel_live so it does not loosen unconditionally."""
+    """Use shallow panel coverage only when live panel selection is enabled."""
     out, log = clamp_mixture(
         {"exploit": 0.6, "rescue": 0.1, "explore": 0.3},
         "productive",
@@ -74,9 +71,7 @@ def test_productive_clamp_does_not_loosen_on_panel_coverage_when_panel_not_live(
 
 
 def test_productive_duplicate_forces_explore_floor_on_collapse():
-    """Fix (2026-06-13): top_bin_share>=0.50 under productive_duplicate FORCES an
-    explore floor (>=0.20) so the controller pivots off the collapsing basin even
-    when the LLM proposed low explore (CD45 9630421 held explore at 0.10-0.15)."""
+    """Structural concentration raises the exploration floor."""
     out, log = clamp_mixture(
         {"exploit": 0.80, "rescue": 0.10, "explore": 0.10},  # LLM held explore low
         "productive_duplicate",

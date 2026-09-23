@@ -55,9 +55,7 @@ def test_rescue_rich_floor():
 
 
 def test_productive_caps_explore_v6_3_lesson():
-    """V6.3 finding: productive targets (CD45) were hurt by forced
-    exploration. Smoke 8692377 showed LLM proposed 0.4 explore on
-    productive_cd45_like. Verify the new explore_max=0.20 clamps it down."""
+    """A productive campaign caps exploration at 0.20 when the proposed share is higher."""
     mixture = {"exploit": 0.60, "rescue": 0.00, "explore": 0.40}
     out, log = clamp_mixture(mixture, "productive")
     assert out["explore"] <= 0.20

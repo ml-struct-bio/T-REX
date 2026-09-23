@@ -1,4 +1,4 @@
-"""Operator-installed backend adapters for T-ReX.
+"""Operator-installed backend adapters for T-REX.
 
 Adapters extend the deterministic action surface; they are trusted Python code
 installed by the operator, never code or shell text supplied by the LLM. The

@@ -1,32 +1,7 @@
-"""Phase 2 observer: poll 3 running BindCraft jobs, ingest partial
-results into T-ReX archive, run live_tick periodically. NO real worker
-submission — T-ReX just OBSERVES the 3 independent BindCraft runs.
+"""Observe independently running BindCraft jobs and append newly parsed results.
 
-Workflow:
-  Every 30 min:
-    1. For each target's BindCraft output dir, parse current Accepted/*.pdb
-       + final_design_stats.csv into ResultRecords.
-    2. Diff against archive — append only NEW results (deduped by result_id).
-    3. Build TargetConstraint + run reduce_evidence → run_live_tick.
-    4. Inspect: state_label transitions, diagnostic_axis_stats, mode_mixture,
-       LaunchDecisions.
-    5. Append a tick_summary JSONL row to ${archive}/phase2_observer.jsonl
-
-This validates the T-ReX orchestrator over 24h with real evolving data WITHOUT
-the §22.1 live-mode daemon (which would actually submit new workers — out of
-scope for this Phase 2 observer pass).
-
-The 3 underlying BindCraft jobs (CD45 / BetV1 / SC2RBD) run independently;
-this observer reads their outputs as they accumulate.
-
-Usage:
-  python -m trex.phase2_observer \\
-    --cd45-output-dir /scratch/.../phase2_bindcraft_cd45_YYYYMMDD/JOBID \\
-    --betv1-output-dir ... \\
-    --sc2rbd-output-dir ... \\
-    --archive-root /scratch/.../trex_archive \\
-    --poll-interval-min 30 \\
-    --max-wall-h 25
+Periodically summarize the accumulated evidence without submitting new workers. This
+utility supports the three target-specific output arguments exposed by its CLI.
 """
 
 from __future__ import annotations
@@ -45,7 +20,7 @@ from .schemas import ResultRecord, TargetConstraint, to_jsonable
 from .success_criteria import is_near_miss, is_strict_success
 
 
-# Per-target TargetConstraint defaults (mirrors V6.3 targets_dict.yaml)
+# Default TargetConstraints for the observer CLI targets.
 TARGETS = {
     "cd45": TargetConstraint(
         target_id="05_CD45", target_class="receptor_tyrosine_phosphatase",
@@ -120,7 +95,7 @@ def run_tick_for_target(
     remaining_h: float,
 ) -> dict[str, Any]:
     """Run reduce_evidence + capture a summary snapshot. NO LaunchDecision
-    emission here — observer is read-only on the T-ReX archive contents.
+    emission here — observer is read-only on the T-REX archive contents.
     """
     target = TARGETS[target_key]
     target_results = [r for r in archive.iter_records(ResultRecord)
@@ -137,14 +112,12 @@ def run_tick_for_target(
     window = target_results[-20:]
     gpu_h_total = sum(r.gpu_h for r in target_results)
 
-    # SSOT-correct stats (was using ad-hoc iPAE-only check before fix 2026-05-26)
     near_miss_n = sum(1 for r in window if is_near_miss(r.metrics))
     strict_in_window = sum(1 for r in window if is_strict_success(r.metrics))
     strict_in_total = sum(1 for r in target_results if is_strict_success(r.metrics))
 
-    # No Foldseek runner yet — pessimistic upper bound: each strict counts
-    # as structurally unique. This is the §2.5 fallback for archives
-    # without Foldseek labels.
+    # This observer uses raw qualified counts as unclustered proxies, not verified
+    # structural SU counts.
     run_su_count = strict_in_total
     run_su_count_delta = strict_in_window
 
@@ -205,7 +178,7 @@ def run_tick_for_target(
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Phase 2 observer (3-target BindCraft)")
+    p = argparse.ArgumentParser(description="Observe BindCraft campaign results")
     p.add_argument("--cd45-output-dir", type=Path, required=True)
     p.add_argument("--betv1-output-dir", type=Path, required=True)
     p.add_argument("--sc2rbd-output-dir", type=Path, required=True)

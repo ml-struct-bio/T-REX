@@ -1,18 +1,7 @@
-"""Parse BoltzGen de novo design output into T-ReX ResultRecord(s).
+"""Parse BoltzGen aggregate CSV outputs.
 
-P2-B (2026-05-26): BoltzGen writes per-target aggregate CSVs (e.g.
-``aggregate_metrics_<run>.csv``, ``final_designs_metrics_<budget>.csv``,
-``all_designs_metrics.csv``) plus CIF outputs at
-``final_ranked_designs/final_*_designs/*.cif``. Available metric columns
-include ``design_iptm``, ``design_to_target_iptm``, ``design_iiptm``,
-``design_ptm``, ``min_design_to_target_pae``, ``structure_confidence``,
-``native_rmsd``, ``native_rmsd_refolded``, ``seq_recovery`` etc.
-
-These are BOLTZGEN-NATIVE metrics, NOT T-ReX's AF2-calibrated strict-success
-rule. So this parser emits ResultRecords with empty `metrics` (diagnostic-
-only path) — the LLM is expected to chain a BoltzGen hit with
-`structure_refilter` (AF2) in a follow-up tick to obtain T-ReX-calibrated
-pLDDT/iPAE/scRMSD.
+Native scores are diagnostic; standardized AF2 evaluation supplies the canonical
+qualification measurements.
 """
 
 from __future__ import annotations
@@ -39,16 +28,8 @@ def _safe_float(v):
 
 
 def _find_metrics_csv(output_dir: Path) -> Path | None:
-    """Locate the BoltzGen aggregate metrics CSV. Prefer
-    `all_designs_metrics.csv` (full pool), fall back to
-    `final_designs_metrics_*.csv` or `aggregate_metrics_*.csv`.
-
-    fix25 (2026-05-26): BoltzGen actually writes its metric CSVs under
-    ``final_ranked_designs/`` and ``intermediate_designs_inverse_folded/``,
-    not the top-level output dir. The earlier flat lookup at
-    ``output_dir/all_designs_metrics.csv`` always missed, returning 0
-    records on every BoltzGen launch (fix24r3 CD45 r1). Use recursive
-    glob to find them under any subdir.
+    """Find aggregate metrics recursively, preferring all_designs_metrics.csv over
+    final-design or aggregate subsets.
     """
     # Prefer the full-pool CSV (recursive — usually in final_ranked_designs/)
     cands = sorted(output_dir.glob("**/all_designs_metrics.csv"))
@@ -192,12 +173,6 @@ def parse_boltzgen_output(
             ctx=ctx, fam=fam, idx=len(records), design_id=design_id,
             bins={"boltzgen_orphan_cif": "1"}, pdb_path=str(cif),
         ))
-    # §22.8.8 (2026-05-27): tolerate empty/header-only CSV (e.g. when
-    # BoltzGen was killed mid-pipeline by the controller timeout salvage
-    # path). Returning `[]` lets the controller record a synthetic
-    # `exit_status="timeout"` summary record with the elapsed gpu_h so
-    # `method_health.cumulative_gpu_h` reflects actual GPU time spent.
-    # The earlier ParseError caused the controller to log a parse_error
-    # and credit 0 GPU-h, contributing to the "boltzgen looks under-
-    # explored" mis-signal seen in 8813621/2.
+    # An empty or header-only CSV yields no design records; the controller still records
+    # elapsed compute and failure status.
     return records

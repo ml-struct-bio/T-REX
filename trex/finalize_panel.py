@@ -1,4 +1,4 @@
-"""Finalize a production wet-lab panel from a T-ReX archive.
+"""Finalize a production wet-lab panel from a T-REX archive.
 
 This is the end-of-run counterpart to the per-tick panel snapshot in
 ``live_tick``. It reruns strict-only Foldseek and MMseqs2 in memory before
@@ -15,6 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .archive import Archive
+from .output_identity import prepare_archive_results
 from .foldseek_clusterer import apply_clusters_to_bins, cluster_archive_pdbs
 from .panel import (
     ProductionPanelConfig,
@@ -59,9 +60,9 @@ def finalize_panel(
     ):
         if not 0.0 < value <= 1.0:
             raise ValueError(f"{name} must be in (0, 1]")
-    results = [
-        r for r in archive.iter_records(ResultRecord) if r.target_id == target_id
-    ]
+    results = prepare_archive_results(
+        (r for r in archive.iter_records(ResultRecord) if r.target_id == target_id), archive.root,
+    )
     strict_rids = {
         r.result_id
         for r in results
@@ -82,8 +83,8 @@ def finalize_panel(
             results,
             target_id=target_id,
             foldseek_binary=foldseek_binary,
-            # Preserve the historical post-hoc helper's 0.80 default. This is
-            # separate from the live controller and the strict-only SU pass.
+            # The post-hoc helper uses 0.80 for whole-archive diagnostics,
+            # separately from the live controller and the strict-only SU pass.
             # A different diagnostic threshold requires an explicit override.
             min_tm_score=collapse_tm_score,
         )
@@ -198,7 +199,7 @@ def finalize_panel(
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Finalize T-ReX production wet-lab panel")
+    p = argparse.ArgumentParser(description="Finalize T-REX production wet-lab panel")
     p.add_argument("--archive-root", type=Path, required=True)
     p.add_argument("--target-id", required=True)
     p.add_argument("--panel-size", "--K", dest="panel_size", type=int, default=8)
@@ -211,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         "--su-tm-score",
         type=float,
         default=0.60,
-        help="Strict-SU Foldseek TM (T-ReX live objective 0.60; "
+        help="Strict-SU Foldseek TM (T-REX live objective 0.60; "
         "pass the run's FOLDSEEK_SU_TM_SCORE to match the live SU).",
     )
     p.add_argument(

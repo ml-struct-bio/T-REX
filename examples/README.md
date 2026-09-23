@@ -5,24 +5,22 @@ Run example commands from the repository root after installing T-REX.
 | Example | Purpose | External requirements |
 | --- | --- | --- |
 | [Analysis demo](analysis_demo/README.md) | Create, validate, inspect and export a small synthetic archive | None; CPU only |
+| [Installation profile](../.env.example) | Record installed environments and executables | Installed backends/assets; follow the [run guide](../docs/slurm.md) |
 | [Campaign YAML](campaign.yaml) | Explicit campaign configuration with the standard defaults | Configured scientific backends, target assets, LLM and GPU allocation |
 | [Custom target](custom_target/README.md) | Specify a target outside the built-in registry | Your target structure |
 
 The analysis demo is an interface smoke, not a short molecular campaign. The
 campaign YAML retains the default 48-hour launch window and three worker slots.
 Changing a budget or enabled families defines a different campaign profile.
-Use `trex campaign show` to inspect resolved values before launching.
-
-For a configuration-only check with your staged target:
+Create and validate a campaign with the public CLI:
 
 ```bash
-trex campaign init campaign.yaml --target cd45 --archive-root ./runs/cd45
-# Edit the target and environment paths before continuing.
-trex campaign show campaign.yaml
-trex campaign run campaign.yaml --dry-run
+trex init campaign.yaml --target cd45 --gpus 4 --hours 48 --output ./runs/cd45
+trex check campaign.yaml
+trex submit campaign.yaml
 ```
 
-`--dry-run` does not launch workers or create the campaign archive. It permits
-missing external backends and does not establish production readiness. Before
-a real run, use the strict preflight in the [README](../README.md#run-a-campaign)
-and confirm that your external environments work on the allocated GPU node.
+Use `trex design campaign.yaml --dry-run` for a read-only resolution check. A
+real `trex design` run expects an existing GPU allocation and LLM endpoint;
+`trex submit` starts the local LLM inside a new Slurm allocation. The nested
+`trex campaign ...` commands remain available as the detailed compatibility API.

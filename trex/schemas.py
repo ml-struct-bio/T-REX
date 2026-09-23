@@ -1,8 +1,5 @@
-"""T-ReX record dataclasses (frozen).
-
-All records are append-only JSONL in the archive. Required fields match
-plan §3. Optional later records (PairwiseComparison, MetaReview,
-CampaignPrior) are present as stubs but have no MVP producer.
+"""Frozen dataclasses for append-only campaign records. Optional record types support
+extensions without requiring every campaign to produce them.
 """
 
 from __future__ import annotations
@@ -20,16 +17,12 @@ StateLabel = Literal[
     "productive", "productive_duplicate", "strict_duplicate_collapse",
     "rescue_rich", "stalled", "deep_stall", "low_evidence",
 ]
-# PredictedChange.axis must be exactly one of the 3 success axes (plan §8 schema fix, 2026-05-25).
-# "diversity" was removed because it is a panel-level concept, not a per-result metric.
-# PreserveConstraint is also limited to strict axes; diversity pressure is handled
-# through route/panel evidence, not lifecycle preserve arithmetic.
+# Predictions and preservation constraints use qualification measurements; diversity is
+# represented by route and panel evidence.
 AxisName = Literal["pLDDT", "iPAE", "binder_scRMSD"]
 PreserveAxisName = Literal["pLDDT", "iPAE", "binder_scRMSD"]
 CalibrationStatus = Literal["frozen", "provisional", "uncalibrated"]
-# §8 schema fix (2026-05-25): LifecycleStatus narrowed from 6 → 4 values.
-# "selected" and "queued" were workflow phases never referenced by lifecycle
-# arithmetic; if needed they belong on ActionCandidate, not HypothesisCard.
+# Hypothesis status is separate from candidate queue or execution state.
 LifecycleStatus = Literal["active", "supported", "contradicted", "retired"]
 ParentStratum = Literal[
     "strict_parent",
@@ -131,14 +124,9 @@ class AxisStat:
     median_deficit: float | None
     calibration_status: CalibrationStatus
     n: int
-    # Two-tier diagnostic axes (v7_3, §4.1 redesign). For DIAGNOSTIC axes
-    # pass_count/near_pass_count/fail_count are classified against
-    # ``quality_threshold`` (the stricter, discriminative good-interface band);
-    # ``below_accept_count`` is the subset of records that fail the tool's
-    # OFFICIAL accept floor ``pass_threshold`` (genuine non-binders). These stay
-    # at their defaults for the strict-gate axes (pLDDT/iPAE/binder_scRMSD),
-    # which are single-tier. pass_threshold=None => quality-only axis (the tool
-    # has no real accept gate, e.g. BindCraft dSASA>=1 / pTM=null).
+    # Diagnostic counts use quality_threshold; below_accept_count uses the source
+    # acceptance threshold. These fields remain at defaults for the canonical
+    # qualification measurements.
     pass_threshold: float | None = None
     quality_threshold: float | None = None
     below_accept_count: int = 0
@@ -172,39 +160,13 @@ class MethodHealthSummary:
     strict_yield: int
     near_miss_yield: int
     routed_proxy: float | None
-    # fix21 (2026-05-26): cumulative GPU-hours invested in this family
-    # across the whole run. Lets the Planner reason about under-explored
-    # families that genuinely need more budget before being judged. Key
-    # use case: BindCraft typically requires ≥1.5–2 cumulative GPU-h on
-    # one target before the first strict_success appears (V5/V6.3
-    # empirical). Without this, the LLM sees `strict_yield=0, attempts=3`
-    # and prematurely deprioritises BindCraft when it has only been
-    # given 0.3 gpu-h.
+    # Total recorded worker compute for this family, including unsuccessful work.
     cumulative_gpu_h: float = 0.0
-    # §22.8.11 (2026-05-27 PM): per-family Foldseek-deduped SU count.
-    # strict_yield counts RAW strict-passing records — but 7 strict from
-    # the same Foldseek cluster only count as 1 unique winner (the run-
-    # level run_su_count is already SU-deduped). Without this, the LLM
-    # sees `complexa_beam: strict_yield=7` and thinks the family is
-    # producing diverse winners when actually all 7 are the same structure.
-    # User's primary optimisation target is SU, not raw strict.
+    # Structurally deduplicated qualified count, distinct from raw strict_yield.
     strict_yield_su: int = 0
-    # 2026-05-28: the resource-credit signal. SU per GPU-hour = how much
-    # structurally-unique success this family bought per unit of the budget
-    # it consumed on THIS target. This is the first-class explore/exploit
-    # credit: a family that produced SU quickly (high su_per_gpu_h) earns
-    # more budget than a slow one, and BindCraft's low-but-nonzero value on
-    # a hard target still beats Complexa's zero there. Computed as
-    # strict_yield_su / max(cumulative_gpu_h, eps). None until any GPU-h
-    # is spent. NOTE: this is a LIFETIME (cumulative-over-run) average — it
-    # never decays, so a family that has gone dry keeps a stale-high value.
+    # Cumulative SU productivity; unset until a suitable compute denominator exists.
     su_per_gpu_h: float | None = None
-    # 2026-05-30 (G-033): WINDOW-scoped recent versions of the two exploit-
-    # ranking signals. The cumulative fields above never decay, so the prompt's
-    # "keep exploiting a productive family" rule fired forever on a family that
-    # stopped producing. These are computed over the recent window and are the
-    # ones the prompt should rank exploit on; the cumulative fields stay as the
-    # "lifetime" reference.
+    # Recent-window evidence supplements cumulative productivity.
     su_per_gpu_h_recent: float | None = None
     near_miss_yield_recent: int = 0
     # SU produced by downstream canonical refiltering of this family's
@@ -213,17 +175,8 @@ class MethodHealthSummary:
     # BindCraft settings worked, not only that "structure_refilter" scored.
     chained_strict_yield_su: int = 0
     chained_su_per_gpu_h: float | None = None
-    # 2026-05-31 (F7): WINDOW-scoped recent versions of the chained-credit
-    # signals — the diagnostic-lane analogue of su_per_gpu_h_recent. The
-    # cumulative chained fields above never decay, so a diagnostic generator
-    # (BindCraft/BoltzGen/MPNN) that produced chained SU early but has since
-    # gone dry kept a stale-high lifetime chained rate, and the prompt judges
-    # those lanes BY the chained credit → it could keep funding a dry lane.
-    # chained_strict_yield_su_recent counts chained SU clusters FIRST SEEN in
-    # the window (marginal, like su_per_gpu_h_recent); chained_su_per_gpu_h_recent
-    # divides it by the recent ROUTE GPU-h (upstream + downstream refilter, in
-    # the window). These are the ones the prompt should rank diagnostic-lane
-    # exploit on; the cumulative chained fields stay as the lifetime reference.
+    # Recent route productivity includes required downstream evaluation and credits only
+    # newly observed SU clusters.
     chained_strict_yield_su_recent: int = 0
     chained_su_per_gpu_h_recent: float | None = None
 
@@ -257,19 +210,11 @@ class LLMHealthSummary:
 
 @dataclass(frozen=True)
 class Exemplar:
-    """A concrete best / near-miss binder WITH the full setup that produced it
-    (2026-05-30). Joins provenance (family / operator / config_delta) to the
-    individual binder's FULL metric vector + per-axis deficits — strictly richer
-    than `Recipe` (config-grouped, 3-axis median, no individual binder) and
-    `Example` (individual binder, but no config/operator). Lets the Planner see
-    "this exact setup produced this exact result", for both the K best proven
-    binders (build on them) and the K closest near-misses (diagnose + route the
-    remediation by the blocking axis). `kind`: "best" = strict success ranked by
-    margin past thresholds (deduped by SU bin → distinct structures);
-    "near_miss" = closest-to-passing failures (smallest normalized dominant
-    deficit; deduped by (operator, config) signature → diverse failing setups).
-    Literal all-axes-fail records are excluded (uninformative noise); known-bad
-    *configs* live in `recipes` (joint_fail)."""
+    """An individual design joined to its generating settings, measurements, and deficits.
+
+    Best examples are qualified and structurally deduplicated; near-miss examples retain
+    diverse failing configurations for planning.
+    """
     kind: str                                  # "best" | "near_miss"
     result_id: str
     family: str
@@ -279,10 +224,7 @@ class Exemplar:
     axis_deficits: dict[str, float]
     dominant_deficit_axis: str | None          # worst STRICT axis (pLDDT/iPAE/scRMSD)
     parent_result_id: str | None
-    # v7_3: worst ACTIONABLE diagnostic axis for THIS design (vs its quality band),
-    # or None. Levered axes only (see DIAGNOSTIC_AXIS_REMEDIATION) so the planner
-    # can route remediation — e.g. a near-miss passing all 3 strict axes but
-    # blocked by ipTM=0.65 carries diagnostic_blocking_axis="ipTM".
+    # Worst actionable diagnostic measurement for this design, or None.
     diagnostic_blocking_axis: str | None = None
     su_bin: str | None = None                  # Foldseek/refilter_source bin (best only)
 
@@ -295,12 +237,8 @@ class Example:
     axis_values: dict[str, float]
     axis_deficits: dict[str, float]
     joint_pattern_label: str | None
-    # 2026-05-30 (do-now rec 1): the single dominant (worst, margin-normalized)
-    # failing axis for THIS candidate — pLDDT (structure), iPAE (interface), or
-    # binder_scRMSD (sequence). None when the candidate passes all three. Lets the
-    # Planner route a per-candidate remediation (seq-hallucinate / interface-noise /
-    # regenerate) instead of reading only aggregate axis_stats. Computed from the
-    # already-present axis_deficits — no new metric.
+    # Largest margin-normalized failing qualification measurement, or None when all
+    # pass.
     dominant_deficit_axis: str | None = None
 
 
@@ -328,13 +266,8 @@ class Recipe:
     median_metrics: dict[str, float]
     representative_result_ids: list[str]
     recency_tick: int
-    # 2026-05-30 (do-now rec 2): route-level SPEED credit. SU (Foldseek-deduped
-    # strict) produced by THIS exact (operator, config_delta) recipe per GPU-hour
-    # it consumed. The user's objective is SU per unit time, so among recipes that
-    # all yield SU the FASTER one should earn more exploit weight — and credit must
-    # be per-ROUTE (e.g. beam+hallucinate vs plain beam), not just per-family.
-    # None for non-strict recipe classes (they produced no SU). Only set on
-    # strict_success recipes.
+    # Qualified structural yield per total compute for this exact route; populated for
+    # successful recipes.
     su_per_gpu_h: float | None = None
 
 
@@ -493,7 +426,6 @@ class EvidenceSummary:
     duplicate_fraction: float | None
     top_bin_share: float | None
 
-    # axis + joint (3 success axes — §2.5 SSOT)
     axis_stats: dict[str, AxisStat]
     joint_patterns: list[JointPatternCount]
     near_miss_count: int
@@ -542,7 +474,7 @@ class EvidenceSummary:
     # the same as an LLM-selected parent-model refold/refinement action.
     refilter_role_health: dict[str, Any] = field(default_factory=dict)
 
-    # archive-derived recipes (Gap A'): proven configurations + recent failures
+    # Observed configurations and recent failures.
     recipes: list[Recipe] = field(default_factory=list)
 
     # Strategy-level outcome ledger for Planner feedback. Unlike `recipes`
@@ -561,36 +493,18 @@ class EvidenceSummary:
     # proteinmpnn_redesign.
     route_values: list[RouteValueSummary] = field(default_factory=list)
 
-    # 2026-05-30: best-K / near-miss-K concrete binders, each WITH the full setup
-    # (family/operator/config_delta) that produced it AND its full metric vector.
-    # The per-binder join of provenance↔result that neither `recipes` (config-
-    # grouped, 3-axis median) nor `examples` (binder, no config) provides.
+    # Individual designs with their generating settings and full measurements.
     exemplars: list[Exemplar] = field(default_factory=list)
 
-    # 2026-05-30 (do-now rec 4): deterministic give-up-and-regenerate signal.
-    # Each entry flags a PARENT backbone that refinement is no longer paying off
-    # on (>=K non-improving refinement children; K=1 when the parent's dominant
-    # block is pLDDT, since a bad fold cannot be fixed by sequence/interface
-    # refinement on a fixed backbone). The builder marks further refinements of
-    # these parents infeasible, and the Planner is told to regenerate from
-    # scratch (fresh family/seed, no parent) rather than keep refining.
-    # Shape per entry: {root_result_id, family, dominant_axis, attempts, reason}.
+    # Exhausted parent lineages with root_result_id, family, dominant_axis, attempts,
+    # and reason.
     stuck_lineage_roots: list[dict] = field(default_factory=list)
 
-    # Recent-fallback signal (formerly `mcr_trigger_high_fallback`, renamed
-    # 2026-05-26 PM when MCR was fully removed — see plan §10.6). True when
-    # recent_fallback_rate >= 0.30. Consumed by Selector §22.8.4 to gate
-    # Category B clamps.
+    # Whether recent fallback frequency activates conditional allocation bounds.
     recent_fallback_high: bool = False
 
-    # Diagnostic axes (§4.1, added 2026-05-26). NOT in strict-success rule;
-    # surfaced to the LLM for finer scientific hypothesis reasoning. The reducer
-    # emits an axis only after enough finite observations (DIAGNOSTIC_MIN_N) in
-    # its family-balanced diagnostic window; sparse n<3 axes are intentionally
-    # omitted rather than over-weighted. Axes span strict gate support metrics,
-    # Complexa interface/proxy terms, BindCraft interface physics, and refilter
-    # diagnostic reads. See evidence_reducer.DIAGNOSTIC_AXIS_THRESHOLDS and
-    # DIAGNOSTIC_AXIS_REMEDIATION for the current SSOT.
+    # Source diagnostics with sufficient observations; these do not determine
+    # qualification. See evidence_reducer for thresholds and remediation metadata.
     diagnostic_axis_stats: dict[str, AxisStat] = field(default_factory=dict)
     # Compact deterministic digest of diagnostic_axis_stats shown to Planner and
     # Supervisor. This is stored in the archive so audits can recover the
@@ -598,20 +512,9 @@ class EvidenceSummary:
     # prompt string. "none" means no qualified diagnostic driver was available.
     diagnostic_driver_tldr: str = "none"
 
-    # L-001 (2026-05-26): tick-by-tick trajectory across the current run.
-    # Each entry shows how the state evolved and what was launched, so the
-    # Planner LLM sees the WHOLE loop (not just the most-recent
-    # EvidenceSummary). Entry shape (free-form to stay compact):
-    #   {tick_id, state_label, strict_count, run_su_count, launches:
-    #    [{family, mode, key_knobs}], dominant_family, notes}.
-    # Capped at the last ~10 ticks. Motivated by qwen_trajectory_history
-    # _smoke (job 8747422) which showed trajectory 2/4 > compact 1/4 lift.
+    # Recent campaign trajectory: state, results, and launched family/mode/settings.
     recent_ticks_history: list[dict] = field(default_factory=list)
-    # v7_3 dispatch-realization audit (2026-06-12): LaunchDecision is selector
-    # intent, while DispatchRecord is actual worker start/failure. This compact
-    # block lets the Planner/Supervisor and offline audits see whether the LLM
-    # E/R/E distribution is becoming real GPU-started work or being lost in a
-    # queue/stale-prefetch layer.
+    # Compare selected work with confirmed worker starts and dispatch failures.
     dispatch_realization: dict[str, Any] = field(default_factory=dict)
 
     # Family-level execution realization, derived from archived
@@ -637,13 +540,8 @@ class EvidenceSummary:
         default_factory=dict
     )
 
-    # review #1 (2026-05-31): SU-dedup provenance, so a reader/LLM can tell when
-    # run_su_count is genuinely Foldseek-deduped vs incomplete/untrusted.
-    # foldseek_su_status: the strict-only clustering status this tick
-    #   ("ok" | "no_binary" | "failed" | "no_structures" | "no_strict" | "disabled").
-    # foldseek_su_coverage: fraction of strict records that received a foldseek_su
-    #   cluster bin. No fallback is allowed for official SU; records without this
-    #   bin stay visible as strict/quality evidence but do not mint SU/new-SU.
+    # Strict-only clustering status and coverage. Missing trusted bins grant no SU
+    # credit.
     foldseek_su_status: str = "ok"
     foldseek_su_coverage: float | None = None
     # Top SU Foldseek-SU bin share among recent raw strict records. This is
@@ -663,8 +561,8 @@ class EvidenceSummary:
     strict_su_live_recent_count: int | None = None
     strict_su_tm08_delta_vs_live: int | None = None
     strict_su_tm08_live_split_ratio: float | None = None
-    # Legacy archive field names from the TM0.5-objective era. In T-ReX TM0.6
-    # runs they mirror the live_* fields so older readers do not break.
+    # Compatibility field names: in TM0.6 runs these mirror the live_* fields;
+    # the tm05 names do not indicate a separate TM0.5 clustering pass.
     strict_su_tm05_recent_count: int | None = None
     strict_su_tm08_delta_vs_tm05: int | None = None
     strict_su_tm08_split_ratio: float | None = None
@@ -678,10 +576,7 @@ class EvidenceSummary:
     # two Foldseek calls can degrade independently.
     foldseek_archive_status: str = "legacy_or_unknown"
     foldseek_archive_coverage: float | None = None
-    # R1 (2026-06-01): scope of the whole-archive collapse pass that produces
-    # duplicate_fraction / top_bin_share. SAFE default for legacy reads;
-    # live_tick sets "recent_scored_window_{K}" once the pass is windowed, so the
-    # planner reads these as a RECENT-collapse signal, not lifetime dedup.
+    # Scope of duplication clustering, including recent-window size when applicable.
     foldseek_archive_result_scope: str = "lifetime_or_unknown"
     whole_archive_structure_dedup_scope: str = "legacy_or_unknown"
     whole_archive_structure_dedup_fallback_count: int = 0
@@ -704,14 +599,8 @@ class EvidenceSummary:
     seq_duplicate_fraction: float | None = None
     top_seq_bin_share: float | None = None
 
-    # LIVE HEADLINE OBJECTIVE (v7_3 2026-07-03): SU per WORKER-WALL GPU-h
-    # (elapsed wall-clock × worker slots; excludes the vLLM/controller GPU).
-    # This is the fair live throughput denominator for a 3-worker controller.
-    #
-    # Route feedback still uses completed worker GPU-h (sum of ResultRecord.gpu_h)
-    # because per-route attribution must charge only jobs that actually ran.
-    # Keep both fields explicit so run-level reporting and route-level learning
-    # cannot silently swap denominators.
+    # Live throughput uses elapsed wall time times worker slots, excluding the LLM GPU.
+    # Route attribution separately uses recorded job compute.
     run_su_per_worker_gpu_h_total: float | None = None
     worker_wall_gpu_count: float | None = None
     worker_wall_gpu_h_total: float | None = None
@@ -719,10 +608,8 @@ class EvidenceSummary:
     run_su_hwm: int | None = None
     run_su_hwm_delta: int | None = None
     run_su_hwm_per_worker_wall_gpu_h_total: float | None = None
-    # F5 plateau governor (2026-06-10): worker GPU-h / ticks since the SU
-    # high-water-mark was last raised (running-max, robust to the SU re-cluster
-    # dip). deep_stall + the chain-refilter throttle key on gpu_h_since_last_su;
-    # both surface to the LLM so it sees plateau DURATION, not just `stalled`.
+    # Worker compute and ticks since the SU high-water mark increased. A reclustering
+    # decrease does not reset progress.
     gpu_h_since_last_su: float | None = None
     ticks_since_last_su: int | None = None
     # Charged accounting is retained only as raw reservation-overhead metadata
@@ -752,29 +639,11 @@ class EvidenceSummary:
     # LLM-cited concrete parents cannot pass feasibility and then skip at
     # dispatch because the structure artifact is missing.
     parent_artifact_result_ids: list[str] = field(default_factory=list)
-    # v7_3 prototype #3 (diagnosis→outcome loop): per blocked-axis remediation
-    # outcome over the archive lineage — {axis: {lever, attempts, improved,
-    # improve_rate, strict, strict_rate}}. Lets the Planner learn which
-    # qualitative diagnoses + remediations actually pay off. Advisory only.
+    # Advisory outcomes grouped by diagnosed measurement and remediation.
     diagnosis_outcomes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    # refold-probe loop closure (#10, 2026-06-13). A parent_model_refold is an
-    # advisory re-fold of an existing parent design under a friendlier AF2 config;
-    # its axis values are recorded as refold_* and NEVER mint SU. Those numbers
-    # used to be written but read by ZERO consumers, so the LLM could be told to
-    # fire the probe yet never saw its answer next tick (a dead loop). This
-    # aggregate JOINS each advisory refold to its parent's CANONICAL strict metrics
-    # (via bins["refilter_source"]) and reports, over the recent window:
-    #   probed            : # advisory refold probes observed
-    #   structure_limited : # whose refold WOULD pass the strict gate while the
-    #                       parent's canonical score did NOT -> the predicted
-    #                       backbone was the bottleneck, the sequence is fine ->
-    #                       REGENERATE / proteinmpnn_redesign that parent to mint
-    #                       SU (re-folding it again cannot, the gate is fixed).
-    #   confirmed_limited : # whose refold ALSO fails -> not structure-limited;
-    #                       the design itself is the problem (pivot family/seed).
-    #   example_parent_ids: up to ~5 structure_limited parent result_ids to act on.
-    # Advisory only; never changes strict_success or run_su_count.
+    # Compare advisory refolds with canonical parent scores. Report joined outcome
+    # categories and example parents without changing qualification or SU credit.
     refold_probe_outcomes: dict[str, Any] = field(default_factory=dict)
 
 
@@ -827,16 +696,13 @@ class HypothesisCard:
     preserve_constraints: list[PreserveConstraint]
     recommended_action_families: list[str]
 
-    ttl_ticks: int = 10  # was 3; calibrated to 10 by lifecycle simulation (plan §21 Q30, 2026-05-26)
+    ttl_ticks: int = 10
     status: LifecycleStatus = "active"
     support_points: float = 0.0
     contradiction_points: float = 0.0
     descendants_evaluated: int = 0
     last_evaluated_tick: int | None = None
-    # Gap A: LLM-proposed parameter overrides per family (Planner output).
-    # CandidateBuilder consults capability_registry.validate_config_delta before
-    # accepting these — out-of-range values are dropped, the action falls back
-    # to defaults.
+    # Proposed per-family settings are validated before candidate construction.
     config_delta_suggestions: dict[str, dict[str, Any]] = field(default_factory=dict)
     reasoning_trace: ReasoningTrace = field(default_factory=ReasoningTrace)
 
@@ -889,12 +755,6 @@ class ActionCandidate:
     # system scoring after a diagnostic generator; parent_model_refold is an
     # intentional E/R/E action on an existing parent.
     refilter_role: RefilterRole | None = None
-
-
-# `MissingCandidateRequest` was removed 2026-05-26 PM along with the rest
-# of the MCR machinery (plan §10.6 removal made permanent in code). The
-# dataclass, schema field, archive table, and Planner emission are all
-# gone. See plan §10.6 for the audit-history removal rationale.
 
 
 # ---------------------------------------------------------------------------
@@ -955,8 +815,8 @@ class SupervisorDecision:
     fallback_used: bool
     rationale: str
     # Persisted so evidence-skip can replay the ORIGINAL confidence when it
-    # reuses this mixture (a reused low-confidence mixture must keep its Cat-B
-    # low-confidence clamp). Default 1.0 keeps legacy records reconstructable.
+    # reuses this mixture, so low-confidence mixtures retain their conditional
+    # allocation bounds. Default 1.0 permits reconstruction of older records.
     confidence: float = 1.0
     # Compact Selector audit trail. This is intentionally informational: it
     # lets the next EvidenceSummary/forensics explain proposed -> selected ->
@@ -973,7 +833,7 @@ class SupervisorDecision:
 class LLMCallRecord:
     call_id: str
     tick_id: str
-    role: Literal["planner", "supervisor", "critic"]  # critic added 2026-05-26 (§22.3)
+    role: Literal["planner", "supervisor", "critic"]
     model: str
     model_digest: str | None
     prompt_hash: str
@@ -981,15 +841,8 @@ class LLMCallRecord:
     latency_s: float
     tokens_in: int
     tokens_out: int
-    # F6 fix (2026-05-31): widened to the token set _llm_call_record actually
-    # stores (= fail_reason.split(":")[0] on the valid=False paths) + the critic's
-    # direct "timeout". The valid=False producers are call_error / parse_fail /
-    # schema_fail (planner+supervisor) and no_hypotheses_or_candidates (supervisor
-    # short-circuit, live_tick.py:998). abstain / low_confidence / empty_cards do
-    # NOT appear here — they are returned with valid=True (planner.py:1086) so
-    # parse_status is "ok". Was ["ok","parse_fail","schema_fail","timeout"], which
-    # omitted call_error + no_hypotheses_or_candidates → archive consumers reading
-    # the narrow set drifted.
+    # Normalized call/parse outcome. Valid abstentions and low-confidence responses
+    # retain ok status.
     parse_status: Literal[
         "ok", "parse_fail", "schema_fail", "timeout",
         "call_error", "no_hypotheses_or_candidates",
@@ -1001,14 +854,11 @@ class LLMCallRecord:
     # coarse for aggregation; this field keeps the actionable validator suffix
     # such as "schema_fail:card[0]:unknown_evidence_refs:[x]".
     fail_reason: str | None = None
-    # §22.3 critic flags (informational; never overrides Selector).
-    # Populated only on role == "critic" calls; empty for planner/supervisor.
-    # Sample entries: "(a) target-prior contradicted by evidence: ...",
-    # "(c) ignored recent failure: ...", or empty if "no_flags".
+    # Advisory Critic flags; empty for Planner and Supervisor calls.
     critic_flags: list[str] = field(default_factory=list)
     # Compact prompt audit snapshot. We intentionally do not archive full
     # prompts because they are tens of thousands of tokens per tick; this bounded
-    # dict stores the decision-critical headers needed for replay/debugging.
+    # dict stores the decision-critical headers needed for replay and inspection.
     prompt_audit: dict[str, Any] = field(default_factory=dict)
 
 

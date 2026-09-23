@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Exercise public T-ReX workflows from an installed wheel, outside the source tree."""
+"""Exercise public T-REX workflows from an installed wheel, outside the source tree."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -44,6 +45,9 @@ EXPECTED_MANIFEST_FIELDS = [
     "interface_contact_density",
     "structure_bin",
     "sequence_bin",
+    "binder_chain",
+    "target_chains",
+    "output_chain_identity",
     "src_pdb",
     "dst_pdb",
 ]
@@ -58,6 +62,13 @@ def _run(
     completed = subprocess.run(
         [str(bin_dir / command), *(str(value) for value in arguments)],
         cwd=work_dir,
+        # This fixture must resolve the installed package, not host campaign
+        # paths or settings inherited from the source-checkout release gate.
+        env={
+            **{key: value for key, value in os.environ.items()
+               if not key.startswith("TREX_")},
+            "PYTHONPATH": "",
+        },
         text=True,
         capture_output=True,
         check=False,
@@ -109,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     imported_package = Path(trex.__file__).resolve()
     if not imported_package.is_relative_to(expected_prefix):
         raise RuntimeError(
-            "wheel smoke imported T-ReX outside the isolated environment: "
+            "wheel smoke imported T-REX outside the isolated environment: "
             f"{imported_package}"
         )
 

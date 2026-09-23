@@ -34,9 +34,7 @@ def refinement_overrides(config_delta: Mapping[str, object]) -> list[str]:
         or bool(config_delta.get("enable_greedy_optimization", False))
         or "greedy_percentage" in config_delta
     )
-    refinement_algorithm = str(
-        config_delta.get("refinement_algorithm", "") or ""
-    )
+    refinement_algorithm = str(config_delta.get("refinement_algorithm", "") or "")
     if greedy_requested and refinement_algorithm != "sequence_hallucination":
         refinement_algorithm = "sequence_hallucination"
         print(
@@ -46,8 +44,7 @@ def refinement_overrides(config_delta: Mapping[str, object]) -> list[str]:
         )
     if "refinement_algorithm" in config_delta or greedy_requested:
         overrides.append(
-            "++generation.refinement.algorithm="
-            f"{refinement_algorithm or 'null'}"
+            "++generation.refinement.algorithm=" f"{refinement_algorithm or 'null'}"
         )
     if refinement_algorithm == "sequence_hallucination":
         if "n_greedy_iters" in config_delta:
@@ -122,12 +119,17 @@ def build_complexa_overrides(
     run_name: str,
     repo: Path,
     campaign_seed: int,
+    seed_run_name: str | None = None,
 ) -> list[str]:
     """Compile one validated candidate into the complete Hydra override list."""
 
     algorithm = ALGORITHM_BY_FAMILY.get(family, "beam-search")
     namespace = NAMESPACE_BY_ALGORITHM.get(algorithm)
-    seed = _launch_seed(candidate_id, run_name, campaign_seed)
+    seed = _launch_seed(
+        candidate_id,
+        seed_run_name if seed_run_name is not None else run_name,
+        campaign_seed,
+    )
     overrides = [
         f"++generation.task_name={target_id}",
         f"++ckpt_path={repo}/ckpts",
@@ -143,18 +145,22 @@ def build_complexa_overrides(
     delta = config_delta or {}
     if "nsteps" in delta:
         nsteps = int(delta["nsteps"])
-        checkpoints = sorted({
-            0,
-            nsteps // 4,
-            nsteps // 2,
-            3 * nsteps // 4,
-            nsteps,
-        })
-        overrides.extend([
-            f"++generation.args.nsteps={nsteps}",
-            "++generation.search.step_checkpoints="
-            f"[{','.join(str(value) for value in checkpoints)}]",
-        ])
+        checkpoints = sorted(
+            {
+                0,
+                nsteps // 4,
+                nsteps // 2,
+                3 * nsteps // 4,
+                nsteps,
+            }
+        )
+        overrides.extend(
+            [
+                f"++generation.args.nsteps={nsteps}",
+                "++generation.search.step_checkpoints="
+                f"[{','.join(str(value) for value in checkpoints)}]",
+            ]
+        )
     if "nsamples" in delta:
         overrides.append(
             f"++generation.dataloader.dataset.nres.nsamples={int(delta['nsamples'])}"
@@ -179,9 +185,7 @@ def build_complexa_overrides(
         if "n_branch" in delta:
             overrides.append(f"++{prefix}.n_branch={int(delta['n_branch'])}")
         if "temperature" in delta and namespace == "fk_steering":
-            overrides.append(
-                f"++{prefix}.temperature={float(delta['temperature'])}"
-            )
+            overrides.append(f"++{prefix}.temperature={float(delta['temperature'])}")
     elif namespace == "best_of_n" and "replicas" in delta:
         overrides.append(
             f"++generation.search.best_of_n.replicas={int(delta['replicas'])}"
@@ -189,9 +193,7 @@ def build_complexa_overrides(
     elif namespace == "mcts":
         prefix = "generation.search.mcts"
         if "n_simulations" in delta:
-            overrides.append(
-                f"++{prefix}.n_simulations={int(delta['n_simulations'])}"
-            )
+            overrides.append(f"++{prefix}.n_simulations={int(delta['n_simulations'])}")
         if "exploration_prob" in delta:
             overrides.append(
                 f"++{prefix}.exploration_prob={float(delta['exploration_prob'])}"
@@ -205,7 +207,10 @@ def build_complexa_overrides(
 
 
 def build_complexa_shell_command(
-    *, repo: Path, python: Path, overrides: list[str],
+    *,
+    repo: Path,
+    python: Path,
+    overrides: list[str],
 ) -> str:
     """Build the reviewed shell boundary required to source Complexa env.sh."""
 

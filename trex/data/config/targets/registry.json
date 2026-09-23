@@ -21,11 +21,6 @@
       "pdb": "bindcraft_targets/HER2_cropped.pdb",
       "target_id": "28_HER2_AAV"
     },
-    "il17a": {
-      "config": "il17a.json",
-      "pdb": "alpha_proteo_targets/4hsa_cropped.pdb",
-      "target_id": "37_IL17A"
-    },
     "il7ra": {
       "config": "il7ra.json",
       "pdb": "alpha_proteo_targets/3di3_cropped.pdb",
@@ -46,10 +41,10 @@
       "pdb": "alpha_proteo_targets/1tnf_repacked.pdb",
       "target_id": "38_TNFalpha_REPACK"
     },
-    "vegfa": {
-      "config": "vegfa.json",
-      "pdb": "alpha_proteo_targets/1bj1_cropped.pdb",
-      "target_id": "36_VEGFA"
+    "trka": {
+      "config": "trka.json",
+      "pdb": "alpha_proteo_targets/1www_cropped.pdb",
+      "target_id": "33_TrkA"
     }
   }
 }

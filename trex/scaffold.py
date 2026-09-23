@@ -1,4 +1,4 @@
-"""Inspect and scaffold operator-installed T-ReX backend adapters."""
+"""Inspect and scaffold operator-installed T-REX backend adapters."""
 
 from __future__ import annotations
 
@@ -16,11 +16,11 @@ _FAMILY_RE = re.compile(r"[a-z][a-z0-9_]{1,63}")
 BACKEND_LIST_SCHEMA_VERSION = "trex.backend-list.v1"
 
 
-_ADAPTER_TEMPLATE = '''"""T-ReX adapter for __FAMILY__.
+_ADAPTER_TEMPLATE = '''"""T-REX adapter for __FAMILY__.
 
 Edit ``build_command`` to match the backend CLI and ``parse_output`` to match
 its artifacts. Keep native metrics backend-prefixed: third-party adapters are
-diagnostic-only and T-ReX performs canonical score conversion separately.
+diagnostic-only and T-REX performs canonical score conversion separately.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def preflight() -> tuple[bool, str]:
 
 
 def build_command(ctx: BackendLaunchContext) -> BackendCommand:
-    """Return direct argv; T-ReX never executes an LLM-supplied shell string."""
+    """Return direct argv; T-REX never executes an LLM-supplied shell string."""
     out = ctx.output_root / "results"
     num_designs = int(ctx.candidate.config_delta.get("num_designs", 8))
     temperature = float(ctx.candidate.config_delta.get("temperature", 1.0))
@@ -140,7 +140,7 @@ ADAPTER = BackendAdapter(
 '''
 
 
-_README_TEMPLATE = """# __FAMILY__ T-ReX adapter
+_README_TEMPLATE = """# __FAMILY__ T-REX adapter
 
 1. Edit `__MODULE__.py` so `build_command` matches the backend CLI.
 2. Replace the example `results.jsonl` parser with strict validation of the

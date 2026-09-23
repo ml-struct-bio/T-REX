@@ -1,0 +1,22 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 23e91a1..ef84047 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -6,7 +6,7 @@ requires-python = ">=3.12"
+ dependencies = [
+     # Core utilities
+     "python-dotenv==1.0.1",
+-    "einops==0.6",
++    "einops==0.8.2",
+     "dm-tree==0.1.8",
+     "loguru==0.7.2",
+     "numpy>=1.23.5",
+@@ -29,7 +29,7 @@ dependencies = [
+     
+     # Data processing
+     "pandas>=2.3.0",
+-    "scipy==1.12.0",
++    "scipy==1.17.1",
+     "h5py",
+     "xarray",
+     "modin[ray]",

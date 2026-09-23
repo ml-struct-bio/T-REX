@@ -1,0 +1,64 @@
+{
+  "schema_version": "trex.complexa-installation.v1",
+  "python": "3.12.13",
+  "platform": "linux",
+  "machine": "x86_64",
+  "uv": "0.11.1",
+  "repository": "https://github.com/NVIDIA-BioNeMo/Proteina-Complexa",
+  "git_commit": "5ae24b055d828918296f2aad63616b1f4cc0e491",
+  "source_trees": {
+    "src/proteinfoundation": "95023516f000d4b301505d2967bb3daa136c5598",
+    "community_models/colabdesign": "844c76c09355e094a29a34c16fead3f63dea3819",
+    "community_models/ProteinMPNN": "6825955f4c3dec0ada2dd0f1a969f61515bd24d2"
+  },
+  "lock": "config/trex/complexa_requirements.lock.txt",
+  "lock_sha256": "f332774971ec39fb3cafd9244fe6be06ceed889b0a18b2ea0b05f76d4ac36457",
+  "dependency_patch": "external/patches/complexa-dependencies.patch",
+  "dependency_patch_sha256": "45e5e885a4597c33423c8edac1372e56c353105907d9f6973722f0e16b76fe49",
+  "patched_pyproject_sha256": "3cb420d3f72a182eb1c016f1ee254be374b1a24389aa7aec35c110fcb6e6b1dd",
+  "metadata_corrections": {
+    "einops": {
+      "declared": "0.6",
+      "installation": "0.8.2",
+      "reason": "Satisfies rc-foundry and atomworks extra dependencies."
+    },
+    "scipy": {
+      "declared": "1.12.0",
+      "installation": "1.17.1",
+      "reason": "Satisfies the SciPy requirements of atomworks and biotraj."
+    }
+  },
+  "changed_installed_versions": {
+    "numpy": {
+      "previous": "2.4.3",
+      "installation": "1.26.4"
+    },
+    "biotite": {
+      "previous": "1.6.0",
+      "installation": "1.4.0"
+    },
+    "chex": {
+      "previous": "0.1.91",
+      "installation": "0.1.87"
+    },
+    "optax": {
+      "previous": "0.2.8",
+      "installation": "0.2.3"
+    },
+    "torchaudio": {
+      "previous": "2.11.0+cu126",
+      "installation": "2.7.0+cu126"
+    }
+  },
+  "scope": "A compatible Complexa/AtomWorks/AF2/ProteinMPNN environment. Source code and checkpoint bytes are unchanged. Full campaign output equality is not established.",
+  "validation": {
+    "fresh_installation": "passed",
+    "repeat_installation": "passed",
+    "dependency_check": "passed: 256 installed packages; 254 locked third-party dependencies",
+    "backend_imports_and_config": "passed",
+    "gpu_smoke": "passed: NVIDIA H100 80GB; PyTorch/JAX/Flax/Optax/Orbax",
+    "checkpoint_loading": "passed: AF2 parameters, Complexa generator and autoencoder",
+    "representative_inference": "passed: Complexa generation, canonical AF2 evaluation and ProteinMPNN redesign",
+    "full_design_campaign": "not tested"
+  }
+}

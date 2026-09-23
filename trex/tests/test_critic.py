@@ -1,9 +1,4 @@
-"""Unit tests for Critic flag parsing (Plan §22.3 + §22.8.5).
-
-The Critic is promised as advisory audit only; soft-veto behavior is a
-thesis violation. These tests pin down `_parse_flags` strictness so a
-hallucinated Critic response cannot become a Planner-level directive.
-"""
+"""Tests for explicit advisory Critic flag parsing."""
 
 from __future__ import annotations
 
@@ -35,9 +30,7 @@ def test_strict_markers_only():
 
 
 def test_prose_without_markers_is_no_flags():
-    """§22.8.5: bare prose is NOT a flag. The earlier fallback that
-    treated any non-empty text as a flag turned the Critic into a soft
-    veto on Planner exploration. Strict parser drops it."""
+    """Unmarked prose is not a Critic flag."""
     assert _parse_flags(
         "Looking at the evidence carefully, I think the proposal is reasonable."
     ) == []
@@ -66,6 +59,6 @@ def test_flag_text_capped_400_chars():
 
 
 def test_unknown_marker_letter_rejected():
-    """Markers like (e), (f) are not in the §22.3 category set."""
+    """Reject markers outside the supported category set."""
     assert _parse_flags("(e) Some made-up category") == []
     assert _parse_flags("(z) Another invented marker") == []

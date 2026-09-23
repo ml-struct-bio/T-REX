@@ -1,4 +1,4 @@
-"""T-ReX archive: append-only JSONL, one file per record type.
+"""T-REX archive: append-only JSONL, one file per record type.
 
 Layout (under archive root):
   result_records.jsonl
@@ -50,8 +50,7 @@ from .schemas import (
 )
 
 
-# Record type → file name. MissingCandidateRequest entry removed
-# 2026-05-26 PM along with the rest of the MCR machinery (plan §10.6).
+# Record type to archive filename.
 RECORD_FILES: dict[type, str] = {
     ResultRecord: "result_records.jsonl",
     EvidenceSummary: "evidence_summaries.jsonl",
@@ -70,18 +69,9 @@ RECORD_FILES: dict[type, str] = {
 
 
 def _inner_dataclass(ftype_str: str) -> type | None:
-    """Parse a string annotation and return the inner dataclass type from
-    `trex.schemas`, or None if not a known dataclass.
+    """Resolve nested schema dataclasses from string annotations.
 
-    Recognized forms (2026-05-26 expanded — was list-only):
-      • ``list[Dataclass]``           → returns Dataclass
-      • ``dict[str, Dataclass]``      → returns Dataclass (value type)
-      • ``Dataclass | None``          → returns Dataclass
-      • ``Dataclass``                 → returns Dataclass
-
-    Python 3.9's `get_type_hints` chokes on PEP-604 unions in this codebase
-    (`X | None`), so we fall back to lightweight string matching on the
-    raw `dataclasses.Field.type` annotation.
+    Supports list[T], dict[str, T], T | None, and T without evaluating annotations.
     """
     if not isinstance(ftype_str, str):
         return None
@@ -130,16 +120,7 @@ def _inner_dataclass(ftype_str: str) -> type | None:
 
 
 def _wrapper_kind(ftype_str: str) -> str:
-    """Return 'list', 'dict', or 'single' to disambiguate empty containers.
-
-    F-001 fix (2026-05-26): when ``raw == {}`` and the field is
-    ``dict[str, Dataclass]``, we must emit ``{}`` (empty mapping) rather
-    than treat ``{}`` as a single Dataclass instance (which then fails the
-    Dataclass constructor with missing-required-arg errors). The earlier
-    code distinguished cases solely by inspecting ``raw`` contents — that
-    is ambiguous for empty dicts. The annotation string carries the
-    information; this helper extracts it.
-    """
+    """Return list, dict, or single from the annotation to disambiguate empty containers."""
     if not isinstance(ftype_str, str):
         return "single"
     s = ftype_str.strip()
@@ -162,14 +143,7 @@ def _reconstruction_plan(cls: type) -> tuple[tuple[str, type | None, str], ...]:
 
 
 def _reconstruct(cls: type, value: Any) -> Any:
-    """Recursively reconstruct nested frozen dataclasses from a dict tree.
-
-    Handles three nested-dataclass cases (2026-05-26 fix — previously only
-    list-of-dataclass was reconstructed, single-instance was left as dict):
-      • List[Dataclass]               : recurse each element
-      • Dict[str, Dataclass]          : recurse each value
-      • Dataclass (single instance)   : recurse directly
-    """
+    """Reconstruct nested dataclasses, including lists, mappings, and single instances."""
     if value is None:
         return None
     if not is_dataclass(cls):
@@ -188,14 +162,8 @@ def _reconstruct(cls: type, value: Any) -> Any:
                     for item in raw
                 ]
             elif isinstance(raw, dict):
-                # F-001 fix (2026-05-26): the previous heuristic inspected
-                # `raw` contents to choose between dict-of-Dataclass vs
-                # single-Dataclass. That heuristic is undefined for empty
-                # dicts — it took the wrong branch and crashed iter_records
-                # (silently skipping every EvidenceSummary with an empty
-                # diagnostic_axis_stats, observed in BetV1 fix3: 5 records
-                # on disk, 0 read back). Now we look at the field type
-                # annotation, which carries the wrapper kind unambiguously.
+                # Use the annotation to distinguish an empty mapping from a single
+                # dataclass.
                 if kind == "dict":
                     kwargs[field_name] = {
                         k: _reconstruct(inner_dc, v) if isinstance(v, dict) else v
@@ -211,7 +179,7 @@ def _reconstruct(cls: type, value: Any) -> Any:
 
 
 class Archive:
-    """Append-only T-ReX archive.
+    """Append-only T-REX archive.
 
     Single-process writer is the common case. Multi-process appends are
     safe per POSIX O_APPEND for line-sized writes (< 4 KB typically),

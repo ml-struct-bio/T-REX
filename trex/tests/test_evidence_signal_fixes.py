@@ -1,16 +1,4 @@
-"""Evidence-signal correctness fixes (2026-05-28).
-
-Locks three fixes to signals the Planner reasons over and the state classifier
-gates on:
-  1. per-family near_miss_yield (was hardcoded 0 → near-miss-only families
-     read as the explore/pivot trigger and got abandoned).
-  2. margin-normalized rescue_axis_concentration (raw deficits on
-     incommensurate scales let pLDDT magnitude dominate, mis-firing
-     rescue_rich).
-  3. marginal run_su_count_delta (was the absolute window SU count → su_rate /
-     su_per_gpu_h never decayed, state stayed "productive" forever even while
-     only re-discovering existing clusters).
-"""
+"""Tests for near-miss yield, normalized deficits, and marginal structural progress."""
 
 from __future__ import annotations
 
@@ -87,11 +75,9 @@ def test_near_miss_yield_is_populated_per_family():
 
 
 def test_near_miss_dedups_by_refilter_source_on_degraded_foldseek(tmp_path):
-    """Q4 (2026-05-31): when foldseek is degraded (no foldseek bin), N af2_refilter
-    refolds of ONE near-miss basin (same refilter_source) must dedup to 1 — else
-    they re-inflate near_miss → false rescue_rich on a no-foldseek worker. The
-    near-miss key intentionally keeps a coarse source/result fallback because it
-    is rescue evidence, not official SU credit."""
+    """Deduplicate repeated evaluations of one near-miss source when structural clustering
+    is unavailable. This diagnostic fallback does not grant SU credit.
+    """
     near = [
         _rec(f"r{i}", "structure_refilter",
              {"pLDDT": 95.0, "iPAE": 0.5, "binder_scRMSD": 1.0},
@@ -105,12 +91,7 @@ def test_near_miss_dedups_by_refilter_source_on_degraded_foldseek(tmp_path):
 
 
 def test_near_miss_yield_uses_exact_near_miss_cluster_map():
-    """N2/P4: cumulative method_health must not depend on whole-archive bins.
-
-    When live_tick supplies a near-miss-only Foldseek map, per-family lifetime
-    near_miss_yield dedups by that exact map instead of falling back to raw
-    result_id counts for older records.
-    """
+    """Use the full near-miss cluster map for cumulative family evidence."""
     near = [
         _rec(f"n{i}", "complexa_beam",
              {"pLDDT": 95.0, "iPAE": 0.5, "binder_scRMSD": 1.0})
@@ -398,7 +379,7 @@ def test_rescue_axis_concentration_uses_margin_units():
     conc = rescue_axis_concentration(stats)
     # margin-normalized: iPAE (6.0) dominates → 6.0 / (1.6 + 6.0) ≈ 0.789
     assert abs(conc - (6.0 / 7.6)) < 1e-6
-    # the buggy raw version would have been pLDDT-dominated 8 / 8.3 ≈ 0.964
+    # Compare normalized deficits rather than summing measurements in unlike units.
     assert conc < 0.90
 
 
@@ -485,10 +466,7 @@ def test_reduce_evidence_preserves_historical_charged_gpu_audit_rates():
     assert ev.charged_gpu_h_total == 8.0
     assert ev.charged_gpu_h_recent == 2.0
     assert ev.charged_gpu_h_scope == "env:TREX_CHARGED_GPUS"
-    # HEADLINE OBJECTIVE (v7_3): SU per WORKER GPU-h is the optimization target;
-    # charged rates are retained for historical archive/prompt compatibility,
-    # but remain informational and are not the optimization target.
-    # worker_gpu_h_total=1.0, run_su_count=4 -> 4.0.
+    # Worker-compute productivity is separate from reserved-allocation metadata.
     assert ev.run_su_per_worker_gpu_h_total == 4.0
     assert ev.run_su_per_charged_gpu_h_total == 0.5
     assert ev.run_su_per_charged_gpu_h_recent == 0.5
@@ -626,11 +604,7 @@ def test_charged_gpu_count_prefers_explicit_env(monkeypatch):
 
 
 def test_su_uses_strict_only_bin_not_whole_archive_hub(tmp_path: Path):
-    """SU BUG FIX (2026-05-31): SU must count distinct STRICT-ONLY clusters
-    (bins['foldseek_su']), NOT the whole-archive bins['foldseek']. If a
-    non-strict 'hub' transitively merges two dissimilar strict hits in the
-    whole-archive clustering (same foldseek bin) while the strict-only
-    clustering keeps them apart (distinct foldseek_su bins), SU must be 2."""
+    """Count strict-only clusters without merging them through nonqualified structures."""
     arc = Archive(tmp_path / "arc_hub")
     for rid in ("s0", "s1"):
         arc.append(_rec(rid, "complexa_beam",
@@ -646,13 +620,7 @@ def test_su_uses_strict_only_bin_not_whole_archive_hub(tmp_path: Path):
 
 
 def test_method_health_strict_yield_su_uses_strict_only_bin(tmp_path: Path):
-    """H-1 (2026-05-31): per-family strict_yield_su must dedup on the
-    strict-only bins['foldseek_su'] — the SAME bin run_su_count uses — NOT the
-    whole-archive bins['foldseek']. Two strict hits merged into one whole-archive
-    'hub' but kept distinct strict-only → strict_yield_su must be 2, not 1.
-    Reading 'foldseek' here under-counts per-family SU vs the run total → the
-    LLM sees a phantom 'mode collapse' (strict_yield > strict_yield_su) and may
-    abandon a productive lane (the SSOT split the review caught)."""
+    """Family and campaign SU counts use the same strict-only clusters."""
     from trex.evidence_reducer import method_health
     recs = [
         _rec("s0", "complexa_beam", {"pLDDT": 95.0, "iPAE": 0.1, "binder_scRMSD": 1.0},
@@ -665,8 +633,6 @@ def test_method_health_strict_yield_su_uses_strict_only_bin(tmp_path: Path):
         "per-family strict_yield_su must use foldseek_su (SSOT with run_su_count)"
     )
 
-
-# --- refilter SU dedup + credit exclusion (2026-05-29) ----------------------
 
 def test_refilter_refolds_of_same_backbone_dedup_to_one_su():
     """Two structure_refilter strict records in the SAME official Foldseek SU
@@ -699,9 +665,7 @@ def test_refilter_excluded_from_su_per_gpuh_exploit_ranking():
 
 
 def test_su_per_gpu_h_recent_decays_while_lifetime_does_not():
-    """G-033: a family that produced SU early but NOT in the recent window must
-    show a stale-high LIFETIME su_per_gpu_h yet a recent su_per_gpu_h of ~0, so
-    the prompt (which now ranks exploit on _recent) stops over-funding it."""
+    """Recent productivity can be zero while cumulative productivity remains positive."""
     import dataclasses
     strict = {"pLDDT": 95.0, "iPAE": 0.1, "binder_scRMSD": 1.0}
     fail = {"pLDDT": 70.0, "iPAE": 0.6, "binder_scRMSD": 3.0}

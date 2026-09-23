@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+
+import pytest
 
 from trex import validation
 
@@ -151,3 +154,83 @@ def test_validation_json_output_is_versioned(monkeypatch, capsys) -> None:
     assert payload["schema_version"] == "trex.installation-validation.v1"
     assert payload["failure_count"] == 0
     assert payload["checks"] == []
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["equivalent", "historical", "dirty", "changed_tree", "unlisted", "no_trees"],
+)
+def test_community_revision_requires_equivalent_source(tmp_path, monkeypatch, variant):
+    checkout = tmp_path / "community"
+    checkout.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=checkout, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    source = checkout / "community_models/colabdesign"
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_text("version = 1\n")
+    git("add", ".")
+    git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "commit",
+        "-qm",
+        "source",
+    )
+    historical = git("rev-parse", "HEAD")
+    tree = git("rev-parse", "HEAD:community_models/colabdesign")
+    (checkout / "README.md").write_text("Public checkout\n")
+    git("add", ".")
+    git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "commit",
+        "-qm",
+        "docs",
+    )
+    public = git("rev-parse", "HEAD")
+    if variant == "historical":
+        git("checkout", "-q", historical)
+    elif variant == "dirty":
+        (source / "__init__.py").write_text("version = 2\n")
+    component = {
+        "git_commit": historical,
+        "equivalent_git_commits": [] if variant == "unlisted" else [public],
+        "equivalent_source_trees": {}
+        if variant == "no_trees"
+        else {
+            "community_models/colabdesign": "0" * 40
+            if variant == "changed_tree"
+            else tree,
+        },
+    }
+    stack = tmp_path / "stack.json"
+    stack.write_text(
+        json.dumps({"components": {"proteina_complexa_community": component}})
+    )
+    monkeypatch.setattr(validation, "PRODUCTION_STACK", stack)
+    monkeypatch.setattr(
+        validation, "_target_checks", lambda *a, **kw: ([], None, None, None)
+    )
+    monkeypatch.setenv("TREX_LEGACY_COMPLEXA_REPO", str(checkout))
+    checks = validation.validate_install(
+        target="test",
+        enabled_families=("proteinmpnn_redesign",),
+        verify_backend_revisions=True,
+    )
+    revision = next(
+        check
+        for check in checks
+        if check.name == "proteina_complexa_community revision"
+    )
+    assert revision.passed == (variant in {"equivalent", "historical"})
+    if variant == "equivalent":
+        assert "identical declared source trees" in revision.detail

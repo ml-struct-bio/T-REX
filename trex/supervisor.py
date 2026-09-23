@@ -1,10 +1,4 @@
-"""Supervisor LLM via vLLM-served Qwen3.6-27B-FP8 (V5/V6.3 production model).
-
-Inputs: EvidenceSummary + active HypothesisCards + validated ActionCandidates.
-Output: mode_mixture + globally and within-mode ordered candidate_decisions.
-
-See plan §12.1. Single call per tick. JSON-only output.
-"""
+"""Supervisor calls and validation of allocation mixtures and candidate rankings."""
 
 from __future__ import annotations
 
@@ -35,7 +29,7 @@ from .schemas import (
 
 SUPERVISOR_CONFIDENCE_GUIDANCE = f"{CONFIDENT_MIXTURE_THRESHOLD:.2f}-0.75"
 
-SUPERVISOR_SYSTEM = """You are the Supervisor for T-ReX, a budgeted protein-binder design controller.
+SUPERVISOR_SYSTEM = """You are the Supervisor for T-REX, a budgeted protein-binder design controller.
 
 Given decomposed evidence, active hypotheses, and validated ActionCandidates,
 choose a mode_mixture and rank launchable candidates.
@@ -166,12 +160,10 @@ def _matched_route_value_for_prompt(
     c: ActionCandidate,
     evidence: EvidenceSummary,
 ) -> dict[str, Any] | None:
-    """Return the exact route row already used by deterministic route safeguards.
+    """Return the matching route evidence using the deterministic selector's matcher.
 
-    Route values and candidates used to be separate prompt sections, leaving the
-    LLM to reconstruct an error-prone family/operator/config/parent join. Reuse
-    the Selector's strict matcher so the LLM sees the same candidate-specific
-    evidence without adding a new ranking or allocation policy.
+    Match the candidate's family, operator, configuration, and parent before
+    constructing its Supervisor input.
     """
     from .planner import compact_route_value_for_prompt
     from .schemas import to_jsonable
@@ -286,12 +278,7 @@ def build_user_prompt(
     selector_context: dict[str, Any] | None = None,
 ) -> str:
     from .fallback import describe_clamp_for_prompt
-    # Supervisor stub-leak fix (2026-05-30): use the SAME curated view as the
-    # Planner (build_evidence_for_prompt) so the Supervisor — the LLM that emits
-    # mode_mixture/resource_class — does NOT receive the route_health/llm_health
-    # stubs (constant "route wide open / LLM perfectly healthy" dicts) that would
-    # anchor it toward over-allocating capacity. This also keeps both LLMs'
-    # evidence views identical, preventing future divergence.
+    # Use the same reduced evidence view as the Planner.
     from .planner import build_evidence_for_prompt
     mixture_ranges = describe_clamp_for_prompt(evidence.state_label)
     payload = {
@@ -347,9 +334,6 @@ def build_user_prompt(
             "parent availability, evaluation requirements, deterministic safeguards, "
             "or current-target evidence."
         )
-    # v7_3: prepend the TL;DR digest and mixture guidance so the evidence
-    # summary and clamp context are the FIRST things read, instead of being
-    # buried after the full evidence dump.
     from .planner import evidence_tldr
     header = (
         evidence_tldr(evidence)
@@ -575,10 +559,8 @@ def _validate_schema(
                 d, candidate_by_id=candidate_by_id, hypothesis_by_id=hypothesis_by_id,
             )
         ):
-            # Overstating a non-extended candidate as `extended` is not a safety
-            # issue; it only degrades ordering and used to trigger fallback.
-            # Downgrade to the registry-estimated concrete cost while preserving
-            # the evidence-enforced guard for true extended-cost candidates.
+            # Normalize overstated resource classes to registry cost estimates while
+            # retaining evidence requirements for expensive candidates.
             d["resource_class"] = _candidate_resource_class(cand)
         if cand is not None and _resource_rank(d["resource_class"]) < _resource_rank(getattr(cand, "estimated_cost_class", None)):
             return False, f"dec[{i}]:resource_class_understates_candidate_cost"
@@ -780,13 +762,9 @@ def build_ranking_repair_prompt(
 
 @dataclass(frozen=True)
 class SupervisorCallConfig:
-    # See PlannerCallConfig: 27B is pinned for T-ReX MVP (V5/V6.3 history +
-    # smoke 8667509 8/8 PASS). 35B-A3B passes 8/8 (job 8692376) at ~2.7x
-    # latency win; optional sensitivity, not default.
     model: str = "vllm/Qwen/Qwen3.6-27B-FP8"
     base_url: str = "http://127.0.0.1:8500/v1"
-    # Live traces hit tokens_out=2048 on schema failures; give the JSON emitter
-    # enough room while keeping the call bounded.
+    # Bound output length while allowing complete structured responses.
     max_tokens: int = 3072
     enable_thinking: bool = False
     confidence_threshold: float = 0.55
@@ -812,9 +790,7 @@ def call_supervisor(
     user_payload = build_user_prompt(
         evidence, hypotheses, candidates, selector_context=selector_context,
     )
-    # Bug A fix (2026-05-30): thread the per-call timeout (see planner.py) so a
-    # hung vLLM request cannot block the synchronous controller reap loop; on
-    # timeout the except below falls back to the deterministic mode mixture.
+    # Bound call latency so a timeout returns to deterministic fallback.
     client = create_client(
         cfg.model, base_url=cfg.base_url, enable_thinking=cfg.enable_thinking,
         timeout=cfg.timeout_s, max_retries=1,
@@ -861,13 +837,7 @@ def call_supervisor(
         obj, known_ids, allowed_evidence_refs=allowed_refs,
         candidate_by_id=candidate_by_id, hypothesis_by_id=hypothesis_by_id,
     )
-    # Scoped one-shot retry for structural ranking errors. These are cheap to
-    # repair and otherwise turn an evidence-grounded scientific decision into a
-    # deterministic fallback for an avoidable formatting omission.
-    # This specific schema_fail recurs on stalled-state Supervisor calls
-    # (3 separate smokes: 8721974, 8723110, 8724321). The model appears to
-    # "hedge" by listing the same candidate in two modes. A targeted retry
-    # with an explicit corrective hint is cheap and scoped.
+    # Retry once with a corrective hint for structural ranking errors, including duplicate mode assignments.
     ranking_schema_error = (
         "duplicate_candidate_across_modes" in why
         or "global_rank" in why

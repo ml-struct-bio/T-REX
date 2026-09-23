@@ -1,0 +1,29 @@
+{
+  "schema_version": "trex.serving-installation.v1",
+  "python": "3.12.13",
+  "platform": "linux",
+  "machine": "x86_64",
+  "lock": "config/trex/serving_requirements.lock.txt",
+  "lock_sha256": "7dcbdbb0bb1e153020f0500529159b430dafc8d166d6a3eb7deb7a02c81d21fe",
+  "historical_inventory": "config/trex/controller_requirements.lock.txt",
+  "differences_from_historical_inventory": {
+    "numpy": {
+      "historical": "2.4.4",
+      "installation": "2.2.6"
+    },
+    "transformers": {
+      "historical": "5.6.0.dev0 @ a29df2d916e3b820aecd19d3b5a877abc523ba3c",
+      "installation": "4.57.6"
+    },
+    "huggingface-hub": {
+      "historical": "1.11.0",
+      "installation": "0.36.2"
+    }
+  },
+  "validation": {
+    "dependency_check": "passed; 179 distributions",
+    "config_and_tokenizer": "passed for the pinned Qwen snapshot",
+    "gpu_smoke": "H100, CUDA toolkit 12.8, vLLM 0.19.0, max_model_len 65536, thinking disabled; direct text generation and OpenAI-compatible HTTP request through the T-REX client passed.",
+    "scope": "Installation/LLM validation only; this profile has not reproduced full study campaigns."
+  }
+}

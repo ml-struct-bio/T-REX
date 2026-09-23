@@ -1,8 +1,4 @@
-"""Q2 bug fixes (smoke 8715062 findings):
-
-  (a) Supervisor validator rejects duplicate candidate_id across modes.
-  (b) Redistribute protects small-mixture modes from quota starvation.
-"""
+"""Tests for duplicate Supervisor recommendations and small-share allocation."""
 
 from __future__ import annotations
 
@@ -25,9 +21,6 @@ def _decision(cid: str, mode: str, rank: int = 1, global_rank: int | None = None
         "expected_signal": "z",
         "stop_or_downgrade_if": "w",
     }
-
-
-# ---- Q2a: duplicate-candidate validator -----------------------------------
 
 
 def test_supervisor_rejects_same_candidate_across_modes():
@@ -86,14 +79,8 @@ def test_supervisor_same_candidate_same_mode_caught_by_rank_check():
     assert "duplicate_candidate_across_modes" in why
 
 
-# ---- Q2b: redistribute min-representation guarantee -----------------------
-
-
 def test_redistribute_protects_small_explore_mixture():
-    """Smoke 8715062 case: exploit infeasible, mixture {0.5/0.4/0.1},
-    raw quotas {2/1/0}, redistribute moved 2 slots → naively rescue:3,
-    explore:0. With protection, explore (mixture 0.1) should steal 1
-    from rescue when feasible."""
+    """Retain a feasible exploration share when redistribution would round it to zero."""
     quotas = {"exploit": 2, "rescue": 1, "explore": 0}
     feasibility = {"exploit": False, "rescue": True, "explore": True}
     mixture = {"exploit": 0.5, "rescue": 0.4, "explore": 0.1}

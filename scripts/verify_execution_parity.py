@@ -259,7 +259,7 @@ def compare_execution(source_root: Path, trex_root: Path) -> dict[str, Any]:
             source_root / "slurm/v7_3_3_per_target_node.slurm", public=False
         )
         public_profile = _launch_profile(
-            trex_root / "slurm/trex_per_target_node.slurm", public=True
+            trex_root / "slurm/T-REX.slurm", public=True
         )
         source_statements = _source_shutdown(
             source_root / SOURCE_PACKAGE / "phase2_v7_controller.py"

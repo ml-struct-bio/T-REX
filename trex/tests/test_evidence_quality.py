@@ -1,9 +1,5 @@
-"""Evidence quality: duplicate/near-miss/top-bin/panel-bins/SU-dedup
-must be derived from real data instead of left as None/0.
-
-Feedback issue #1+2: live_tick previously passed None/0 placeholders
-to reduce_evidence, causing state classifier to misclassify productive
-vs stalled targets on real campaigns.
+"""Tests deriving duplication, near misses, diversity, and qualified counts from
+archived results.
 """
 
 from __future__ import annotations
@@ -84,8 +80,7 @@ def test_near_miss_count_computed(tmp_path: Path):
     pLDDT>=90 (near margin 5), iPAE<=0.226 (near margin 0.05), scRMSD<1.5 (near margin 0.3).
     'fail' label requires deficit > margin."""
     arc = Archive(tmp_path / "a2")
-    # review #5: near_miss_count is now DISTINCT structural basins (foldseek bin),
-    # so give the two near-misses distinct bins to count as 2.
+    # Use distinct near-miss clusters so both observations count.
     arc.append(_r("r1", iPAE=0.45, fb="NM_A"))   # iPAE fail (deficit 0.22 > margin 0.05)
     arc.append(_r("r2", iPAE=0.50, fb="NM_B"))   # iPAE fail (deficit 0.27 > margin 0.05)
     arc.append(_r("r3", pLDDT=92, iPAE=0.20, scRMSD=1.3))  # strict pass (all axes)
@@ -103,9 +98,7 @@ def test_near_miss_count_computed(tmp_path: Path):
 
 
 def test_near_miss_count_structurally_deduped(tmp_path: Path):
-    """review #5 (2026-05-31): two near-misses in the SAME structural basin
-    (same foldseek bin) count as ONE — so a single basin re-discovered cannot
-    inflate near_miss_count → rescue_rich."""
+    """Repeated observations of the same near-miss structure count once."""
     arc = Archive(tmp_path / "a2dedup")
     arc.append(_r("r1", iPAE=0.45, fb="SAME"))
     arc.append(_r("r2", iPAE=0.50, fb="SAME"))   # same basin
@@ -160,10 +153,7 @@ def test_su_dedup_uses_foldseek_bins(tmp_path: Path):
     from trex.schemas import EvidenceSummary
     ev = list(arc.iter_records(EvidenceSummary))[-1]
     assert ev.run_su_count_delta == 3
-    # State: the live re-cluster finds no PDBs here -> foldseek_su_status != "ok"
-    # -> su_dedup_trusted=False. Review fix #5 (2026-06-13): an untrusted dedup is
-    # treated as a plateau (stalled) so a collapsed run can escape, instead of the
-    # old masquerade where an inflated/untrusted delta fell through to low_evidence.
+    # Missing trusted structural clusters prevent productive-state credit.
     assert summary["evidence"]["state_label"] == "stalled"
 
 

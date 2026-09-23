@@ -50,7 +50,7 @@ def execution_trees(tmp_path, verifier):
         'MAX_WALL_H="${MAX_WALL_H:-47.0}"\n'
     )
     (source / "slurm/v7_3_3_per_target_node.slurm").write_text(profile)
-    (release / "slurm/trex_per_target_node.slurm").write_text(
+    (release / "slurm/T-REX.slurm").write_text(
         profile.replace("MAX_WALL_H", "TREX_MAX_WALL_H")
         .replace("48:00:00", "49:00:00")
         .replace("47.0", "48.0")
@@ -140,9 +140,9 @@ def test_shutdown_matches_original_per_slot_trace(verifier, execution_trees):
             "            worker_slot.free()\n"
             "            # Match the original final drain",
         ),
-        ("slurm/trex_per_target_node.slurm", "49:00:00", "48:00:00"),
-        ("slurm/trex_per_target_node.slurm", "gpu:h100:4", "gpu:4"),
-        ("slurm/trex_per_target_node.slurm", "48.0", "47.0"),
+        ("slurm/T-REX.slurm", "49:00:00", "48:00:00"),
+        ("slurm/T-REX.slurm", "gpu:h100:4", "gpu:4"),
+        ("slurm/T-REX.slurm", "48.0", "47.0"),
     ],
 )
 def test_execution_parity_detects_regressions(
@@ -235,7 +235,7 @@ def test_low_level_controller_keeps_original_cli_defaults(tmp_path):
 
 def test_shell_and_environment_template_use_production_window():
     shell = (ROOT / "scripts/run_controller.sh").read_text()
-    slurm = (ROOT / "slurm/trex_per_target_node.slurm").read_text()
+    slurm = (ROOT / "slurm/T-REX.slurm").read_text()
     environment = (ROOT / ".env.example").read_text()
     assert shell.count("${TREX_MAX_WALL_H:-48.0}") == 2
     assert "${TREX_MAX_WALL_H:-48.0}" in slurm

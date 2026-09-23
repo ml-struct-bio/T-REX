@@ -1,4 +1,4 @@
-"""Machine-readable layout and join guidance for T-ReX archives."""
+"""Machine-readable layout and join guidance for T-REX archives."""
 
 from __future__ import annotations
 

@@ -29,7 +29,8 @@ def _write_numbered_pdb(
 ) -> None:
     lines = []
     for serial, (chain, residue_number, insertion_code) in enumerate(
-        residues, start=1,
+        residues,
+        start=1,
     ):
         lines.append(
             f"ATOM  {serial:5d}  CA  ALA {chain}{residue_number:4d}"
@@ -65,7 +66,9 @@ def _write_numbered_pdb(
     ],
 )
 def test_complexa_family_uses_one_canonical_override_builder(
-    family: str, algorithm: str, specific_override: str,
+    family: str,
+    algorithm: str,
+    specific_override: str,
 ) -> None:
     overrides = build_complexa_overrides(
         family=family,
@@ -113,11 +116,35 @@ def test_complexa_launch_seed_is_deterministic_and_campaign_specific() -> None:
     assert first_seed != replicate_seed
 
 
+def test_complexa_output_namespace_does_not_change_launch_seed() -> None:
+    common = {
+        "family": "complexa_beam",
+        "candidate_id": "candidate-1",
+        "config_delta": {},
+        "target_id": "target-1",
+        "repo": Path("/opt/complexa"),
+        "campaign_seed": 1,
+    }
+    historical = build_complexa_overrides(**common, run_name="run-1")
+    isolated = build_complexa_overrides(
+        **common,
+        run_name="run-1-a123456789abc",
+        seed_run_name="run-1",
+    )
+
+    historical_seed = next(item for item in historical if item.startswith("++seed="))
+    isolated_seed = next(item for item in isolated if item.startswith("++seed="))
+    assert historical_seed == isolated_seed
+    assert "++run_name=run-1-a123456789abc" in isolated
+
+
 def test_greedy_knobs_activate_the_required_refinement() -> None:
-    overrides = refinement_overrides({
-        "n_greedy_iters": 5,
-        "enable_greedy_optimization": True,
-    })
+    overrides = refinement_overrides(
+        {
+            "n_greedy_iters": 5,
+            "enable_greedy_optimization": True,
+        }
+    )
 
     assert "++generation.refinement.algorithm=sequence_hallucination" in overrides
     assert "++generation.refinement.n_greedy_iters=5" in overrides
@@ -196,7 +223,7 @@ def test_af2_refilter_builder_preserves_scientific_parameters_and_seed(
         python=tmp_path / "af2-env/bin/python",
         community_root=tmp_path / "community_models",
         af2_data_dir=tmp_path / "community_models/ckpts/AF2",
-        trex_repo_root=tmp_path / "T-ReX",
+        trex_repo_root=tmp_path / "T-REX",
         candidate_id="candidate-7",
         config_delta={
             "model_names": "model_2_multimer_v3",
@@ -218,7 +245,7 @@ def test_af2_refilter_builder_preserves_scientific_parameters_and_seed(
     assert _argument(first.argv, "--seed") != _argument(replicate.argv, "--seed")
     assert first.environment["CUDA_VISIBLE_DEVICES"] == "2"
     assert first.environment["XLA_PYTHON_CLIENT_PREALLOCATE"] == "false"
-    assert first.environment["PYTHONPATH"].startswith(f"{tmp_path / 'T-ReX'}:")
+    assert first.environment["PYTHONPATH"].startswith(f"{tmp_path / 'T-REX'}:")
 
 
 def test_boltzgen_spec_maps_raw_residues_to_chain_local_positions(

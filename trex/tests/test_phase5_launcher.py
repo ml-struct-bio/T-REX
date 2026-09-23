@@ -1,14 +1,4 @@
-"""Unit tests for `phase5_launcher` — the §22.1 outer launcher daemon.
-
-This is the **single critical-path gap** between decision-only smoke and
-live closed-loop deployment (per `v7_smoke_tracking_2026-05-24.md`
-line 927). Tested here at the function level so the daemon can be wired
-into live deployment with confidence.
-
-Tests use only the `test` mode (no SLURM, no real workers) — daemon
-behavior in `live` mode is intentionally not unit-tested (sbatch + sacct
-are external services).
-"""
+"""Tests for the staged-output launcher simulation; no real workers or Slurm submissions."""
 
 from __future__ import annotations
 
@@ -75,9 +65,7 @@ def _launch(cid: str = "c1", status: str = "launched") -> LaunchDecision:
 
 
 def test_parser_registry_covers_v7_core_families():
-    """Required parsers for the core families that the daemon's test mode
-    will encounter. proteinmpnn / refilter are intentionally absent (OQ-004
-    in implementation_notes — pending fixtures)."""
+    """Check the parser registry supported by the launcher simulation."""
     required = {"bindcraft", "complexa_beam", "complexa_best_of_n",
                  "complexa_fk_steering", "complexa_mcts"}
     assert required.issubset(set(PARSER_BY_FAMILY)), (

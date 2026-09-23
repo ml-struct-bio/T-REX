@@ -1,24 +1,8 @@
-"""ModeBudgetedBatchSelector.
+"""Deterministic candidate selection and allocation realization.
 
-Inputs: validated ActionCandidates + SupervisorOutput.
-Output: list of LaunchDecisions (selected + top-3 rejected per mode).
-
-Pure / deterministic. Uses fallback.py for clamps & quotas.
-See plan §12.3.
-
-T-ReX novelty vs realization (the design boundary):
-  NOVELTY (fixed): an LLM agent predicts, from feedback, a DISTRIBUTION over
-    {exploit, rescue, explore} plus a global immediate candidate order. The
-    distribution is the longer-horizon search strategy; global_rank expresses
-    what the current evidence says should run next across modes.
-  REALIZATION (engineering, swappable): turning that distribution into discrete
-    per-slot actions. Fresh valid LLM decisions use global_rank subject to hard
-    feasibility/capacity safeguards. The fallback default is fractional carry
-    (`quota_realization="fractional_carry"`): each Supervisor mixture adds
-    per-mode credit and actual worker-started launches spend it, so small
-    rescue/explore shares survive mostly-single-slot event ticks without a
-    fixed K-window. K-window deficit-fill, largest-remainder, and stochastic
-    sampling remain one-flag ablations.
+Use eligible Supervisor rankings subject to feasibility and capacity constraints. The
+default fallback carries fractional allocation credit across cycles and spends it on
+confirmed starts. Alternative quota policies support explicit comparisons.
 """
 
 from __future__ import annotations
@@ -85,29 +69,16 @@ class SelectorConfig:
     mode_window_k_urgent: int = 4
     mode_window_k_stalled: int = 6
     mode_window_k_duplicate: int = 8
-    # Mode-budget source (v7_3 2026-06-10, user decision). DEFAULT False = the
-    # per-mode budget IS the supervisor's directly-stated scalar mode_mixture —
-    # the empirically-validated choice (the good T-ReX runs used the scalar) and the
-    # LLM's DIRECT expression of intended budget. When True, the budget is instead
-    # DERIVED from the ranked candidate_decisions (rank-weighted Σ 1/rank); that
-    # respects a rank-1 conviction but conflates "how many candidates were listed
-    # per mode" with "how much budget", and has NOT been validated on a real
-    # target — kept as an opt-in flag for a future SU-yield A/B. Either way the
-    # downstream clamps are IDENTICAL, and any configured realization method
-    # operates on the resulting scalar mixture, so
-    # this flag only changes where that one scalar target comes from. The ranking
-    # always sets the within-mode candidate ORDER regardless of this flag.
+    # By default use the Supervisor scalar mixture. The optional rank-derived mixture
+    # changes allocation shares; candidate ordering still follows the rankings.
     derive_mixture_from_ranking: bool = False
-    # Quota realization strategy (T-ReX framing). The NOVELTY is upstream: an LLM
-    # agent predicts a feedback-conditioned DISTRIBUTION over {exploit,rescue,
-    # explore}; that distribution IS the search strategy. HOW that distribution is
-    # turned into discrete per-slot actions is swappable engineering. The default
-    # is fractional carry: no fixed K-window, but small Supervisor shares accrue
-    # launch credit until they actually reach a worker-started slot.
-    #   "fractional_carry"      : started-dispatch-corrected credit (default)
-    #   "largest_remainder"     : per-tick proportional rounding
-    #   "deterministic_deficit" : K-window largest-deficit fill
-    #   "stochastic"            : seeded multinomial / probability-matching sampling
+    # Convert allocation shares to worker starts using the configured strategy.
+    # fractional_carry accumulates small shares without a fixed history window;
+    # credit is corrected using confirmed starts.
+    # fractional_carry: accumulated credit corrected for worker starts (default)
+    # largest_remainder: per-tick proportional rounding
+    # deterministic_deficit: largest-deficit fill over a K-start window
+    # stochastic: seeded multinomial sampling
     quota_realization: str = "fractional_carry"
     # Fresh valid Supervisor decisions carry an explicit cross-mode global rank.
     # Use it for the immediate worker order; keep quota realization as the
@@ -117,14 +88,9 @@ class SelectorConfig:
     duplicate_pressure_fraction: float = 0.75
     family_share_cap_when_duplicate: float = 0.70
     dispatch_family_window_k: int = 10
-    # GAP 1 (2026-06-13): cost-aware family admission. Target-agnostic, evidence-
-    # only guardrail: under-sampled or recently productive families keep their
-    # shot, but an expensive family that is dead OR strongly dominated on
-    # chained/direct SU per worker-GPU-h is demoted below healthier families. A
-    # penalty >= cost_aware_defer_penalty also removes that family from the
-    # primary quota pool when another feasible family exists, so a stale explore
-    # lane cannot idle/consume the next slot while a productive exploit/rescue
-    # card is launchable. Toggle for A/B.
+    # Demote sufficiently observed, costly, unproductive families when feasible
+    # alternatives exist. Preserve opportunities for under-observed or recently
+    # productive families.
     cost_aware_family_tiebreak: bool = True
     cost_aware_waste_gpu_h: float = 3.0
     cost_aware_low_yield_gpu_h: float = 8.0
@@ -308,7 +274,6 @@ def _repeated_support_probe_cap(
     if clearly_negative:
         return None
     return max(1, int(cap))
-
 
 
 def _rate(h: Any, *keys: str) -> float:
@@ -757,7 +722,7 @@ def _family_cost_penalties(
         Also used for a high-cost lane that is strongly dominated by another
         observed family and has no recent SU/near-miss evidence.
 
-    This keeps the T-ReX near-miss lesson: a family with recent near-misses is not
+    This keeps the T-REX near-miss lesson: a family with recent near-misses is not
     treated as dead, while an old one-off near-miss no longer protects an
     otherwise dry lane forever.
     """
@@ -774,8 +739,6 @@ def _family_cost_penalties(
 
     def _su_count(h) -> int:
         vals: list[int] = []
-        # F7 (2026-06-18): dropped phantom "strict_yield_su_recent" (not a
-        # MethodHealthSummary field — only the chained recent count exists).
         for k in (
             "strict_yield_su",
             "chained_strict_yield_su",
@@ -831,8 +794,7 @@ def _family_cost_penalties(
         recent_su = _rate(h, "su_per_gpu_h_recent")
         recent_chain = _rate(h, "chained_su_per_gpu_h_recent")
         recent_near_raw = _mh_value(h, "near_miss_yield_recent", None)
-        # Legacy/unit-test method_health dicts may not carry recent fields. In
-        # that case preserve the old behavior: lifetime near-miss protects.
+        # Use cumulative near-miss evidence when older records lack recent fields.
         recent_near = (
             near if recent_near_raw is None else int(recent_near_raw or 0)
         ) if near_miss_trusted else 0
@@ -866,16 +828,14 @@ def _family_cost_penalties(
     # family/config is low value. Selector must preserve Supervisor's ranked
     # scientific choice; the dispatcher may temporarily defer start if all
     # same-family high-cost worker slots are already occupied. The pressure is
-    # still surfaced separately via capacity_pressure_* debug/context fields.
+    # reported separately through the capacity_pressure_* diagnostic fields.
     return penalties
 
 
 def family_cost_penalties_for_cfg(evidence: EvidenceSummary, cfg: SelectorConfig) -> dict[str, int]:
-    """Public wrapper: the cost-admission penalties the selector WILL apply, from
-    a SelectorConfig. Used by both select_launches and the Supervisor prompt
-    (live_tick) so the LLM sees the SAME deprioritization the selector enforces —
-    no param drift (F6, 2026-06-18). Returns {family: penalty} (0=healthy omitted;
-    1=soft within-mode demotion; >=cost_aware_defer_penalty=removed from primary pool)."""
+    """Return cost-admission penalties shared by selection and Supervisor guidance. Zero
+    penalties are omitted; large penalties can defer a family from the primary pool.
+    """
     if not cfg.cost_aware_family_tiebreak:
         return {}
     return _family_cost_penalties(
@@ -1228,7 +1188,7 @@ def best_route_value_row(c: ActionCandidate, evidence: EvidenceSummary) -> Any |
     return sorted(rows, key=_row_key)[0]
 
 
-# Backward-compatible alias for downstream notebooks and historical tests.
+# Compatibility alias for downstream callers.
 _best_route_value_row = best_route_value_row
 
 
@@ -1496,11 +1456,9 @@ def _candidate_safe_for_strong_productive_momentum(
     min_rate = cfg.productive_wall_momentum_route_min_su_per_gpu_h
     if _candidate_route_rate(c, evidence) >= min_rate:
         return True
-    # Productive cheap families often spawn nearby config variants whose exact
-    # route row is not yet recent-positive. Let family-level current SU evidence
-    # qualify the second momentum slot, while still excluding high-cost workers
-    # and canonical score-conversion above. This recovers the previously validated fast
-    # exploitation on easy productive targets without hard-coding target names.
+    # Allow family-level recent productivity to support nearby configurations
+    # without exact-route observations. High-cost workers and system evaluation
+    # remain excluded.
     h = (getattr(evidence, "method_health", None) or {}).get(c.method_family)
     if h is None:
         return False

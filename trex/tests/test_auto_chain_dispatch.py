@@ -1,10 +1,4 @@
-"""Auto-chain dispatch (bug fix 2026-05-28).
-
-The controller enqueues downstream refilter ActionCandidates (candidate_id
-"chain_…") into the archive after a diagnostic-only generator finishes.
-T-ReX drains those candidates through the event-controller reserve/backfill lane,
-not through the scientific E/R/X Selector pool.
-"""
+"""Test deterministic queuing and dispatch of evaluations for diagnostic outputs."""
 
 from __future__ import annotations
 
@@ -444,9 +438,6 @@ def test_diagnostic_chain_backlog_distinguishes_queued_from_dispatched(tmp_path:
     assert dispatched["launched_chain_candidates"] == 1
 
 
-# ---- registry-001 (2026-06-18): lazy re-chain of stranded diagnostic artifacts ----
-
-
 def _scored_refilter(rid: str, source_rid: str) -> ResultRecord:
     m = {"pLDDT": 92.0, "iPAE": 0.2, "binder_scRMSD": 1.0}
     return ResultRecord(
@@ -458,11 +449,7 @@ def _scored_refilter(rid: str, source_rid: str) -> ResultRecord:
 
 
 def test_lazy_rechain_does_not_refilter_canonical_score_conversion_record(tmp_path: Path):
-    """Canonical AF2 score-conversion records are already scored.
-
-    Regression for a live BetV1 no-op where lazy_rechain minted
-    structure_refilter->structure_refilter candidates and four were dispatched.
-    """
+    """Canonical score-conversion records must not queue another conversion."""
     from trex.controller import (
         _lazy_rechain_stranded_diagnostic_artifacts,
         _record_needs_score_conversion,
@@ -545,7 +532,6 @@ def test_lazy_rechain_is_bounded_by_target_buffer_and_idempotent(tmp_path: Path)
     second = _lazy_rechain_stranded_diagnostic_artifacts(
         arc, tick_id="v7r002", chain_seq_ref=seq, target_buffer=3)
     assert second == 0
-
 
 
 def _evidence_with_route_status(family: str, status: str):
@@ -644,7 +630,7 @@ def test_advisory_parent_model_refold_does_not_clear_score_conversion_backlog(tm
 
 
 def test_boltzgen_aggregate_artifact_is_not_score_conversion_parent(tmp_path: Path):
-    """Regression for SC2RBD: root boltzgen/design.cif caused parse-error loops."""
+    """A root aggregate structure is not an individual score-conversion parent."""
     from trex.live_tick import _record_needs_canonical_score_conversion
     from trex.controller import _record_needs_score_conversion
 

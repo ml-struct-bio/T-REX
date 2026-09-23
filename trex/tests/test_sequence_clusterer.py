@@ -49,7 +49,7 @@ def _result(rid: str, pdb: Path, *, target: str = "t1") -> ResultRecord:
         gpu_h=0.1,
         exit_status="ok",
         bins={},
-        artifacts={"pdb_path": str(pdb)},
+        artifacts={"pdb_path": str(pdb), "binder_chain": "B"},
         panel_ready=False,
     )
 

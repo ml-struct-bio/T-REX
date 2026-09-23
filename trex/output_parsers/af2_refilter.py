@@ -1,4 +1,4 @@
-"""Parse V5 AF2 refilter output (`af2_refilter_result.json`) into T-ReX
+"""Parse AF2 evaluation output (`af2_refilter_result.json`) into T-REX
 ResultRecord(s).
 
 The runner (`trex.af2_refilter_runner`) writes a single JSON
@@ -14,18 +14,16 @@ with this schema:
         "sequence_sha256": {"A": "...", "B": "..."},
       },
       "metrics": {
-        "i_pae": float,            # T-ReX iPAE (already 0..1)
-        "plddt": float,             # T-ReX pLDDT in [0, 1] — multiply by 100
-        "binder_scrmsd_ca": float,  # T-ReX binder_scRMSD (Å)
+        "i_pae": float,            # T-REX iPAE (already 0..1)
+        "plddt": float,             # T-REX pLDDT in [0, 1] — multiply by 100
+        "binder_scrmsd_ca": float,  # T-REX binder_scRMSD (Å)
         "iptm": float,              # diagnostic
         "raw_losses": {...},
         "predicted_pdb": "...",
       }
     }
 
-P2-A (2026-05-26): refilter outputs a SINGLE record per parent binder
-PDB (the AF2 prediction of that exact complex). Multi-binder refiltering
-is achieved by dispatching multiple Popen calls.
+Each evaluated parent produces one record.
 """
 
 from __future__ import annotations
@@ -45,7 +43,7 @@ AF2_REFILTER_GPU_H_PER_RUN = 0.05  # tiny — single AF2 multimer pass
 def parse_af2_refilter_output(
     output_dir: Path, ctx: ParserContext
 ) -> list[ResultRecord]:
-    """Read af2_refilter_result.json and emit one T-ReX ResultRecord."""
+    """Read af2_refilter_result.json and emit one T-REX ResultRecord."""
     if not output_dir.exists():
         raise ParseError(f"AF2 refilter output dir missing: {output_dir}")
     report_path = output_dir / "af2_refilter_result.json"
@@ -54,24 +52,9 @@ def parse_af2_refilter_output(
     report = json.loads(report_path.read_text())
     raw = report.get("metrics") or {}
 
-    # SU-minting basis must be a FIXED function of the design (2026-06-12). The
-    # strict gate (pLDDT/iPAE/scRMSD) is written ONLY from the CANONICAL AF2 score
-    # — the fixed single-model, default-recycle, initial-guess config the auto-chain
-    # conversion and the V5/V6.3 baselines use. AF2 structure_refilter has two uses:
-    #   (1) canonical SCORE-CONVERSION — gate a Complexa/BoltzGen/BindCraft/MPNN
-    #       design under the fixed config; MINTS SU.
-    #   (2) parent_model_refold — re-fold under a DIFFERENT config (model ensemble,
-    #       num_recycles, use_initial_guess) to probe "is the predicted STRUCTURE the
-    #       bottleneck while the sequence is fine?". This is a different MEASUREMENT of
-    #       the same design, so minting SU from it would make the strict gate
-    #       config-dependent (re-fold a near-miss under a friendlier config until it
-    #       passes = measurement shopping against a non-negotiable gate). It is
-    #       therefore ADVISORY ONLY: its axis values are recorded as refold_* and
-    #       never populate the canonical strict keys. (To actually fix a "good
-    #       sequence / bad backbone" the correct ACTION is to re-DESIGN — ProteinMPNN
-    #       or regeneration — not to re-measure the same design.)
-    # A score is advisory iff the candidate is an intentional parent_model_refold OR
-    # it ran a multi-model ensemble (ColabDesign mean-averages losses across models).
+    # Only canonical AF2 evaluation supplies qualification measurements.
+    # Alternative-config refolds are advisory: store their measurements under refold_*
+    # keys without granting SU credit.
     _model_names = raw.get("model_names")
     if isinstance(_model_names, str):
         _model_names = [m.strip() for m in _model_names.split(",") if m.strip()]
@@ -79,12 +62,8 @@ def parse_af2_refilter_output(
     _is_advisory = ctx.refilter_role == PARENT_MODEL_REFOLD or _n_models > 1
 
     metrics: dict[str, float] = {}
-    # All-or-none on the 3 strict axes (2026-05-31, strict_gate_nearmiss LOW):
-    # emitting a PARTIAL subset (e.g. binder_scrmsd_ca dropped by the runner's
-    # _float_dict when the ColabDesign rmsd loss is absent) would leave a 2-axis
-    # record on which is_near_miss fires even though the blocking axis is
-    # UNKNOWN. is_strict_success already requires all three; mirror that so a
-    # partial refold is purely diagnostic (never strict, never near-miss).
+    # Emit the three qualification measurements together; partial measurements cannot
+    # establish a near miss.
     _p, _i, _r = raw.get("plddt"), raw.get("i_pae"), raw.get("binder_scrmsd_ca")
     if all(isinstance(x, (int, float)) for x in (_p, _i, _r)):
         if _is_advisory:

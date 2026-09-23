@@ -1,332 +1,323 @@
-# Installation
+# Installation and required files
 
-## Controller and analysis package
+Install the [T-REX controller](../README.md#1-install-the-controller) first. A molecular campaign
+also needs the external software and files below. Keep backend environments
+separate and place them on compute-node-accessible storage.
 
-Use Python 3.10, 3.11 or 3.12. From a downloaded or cloned T-REX repository:
+Use the compatible installation profiles below. Software identities and the
+distinction between installation checks and benchmark reproduction are described
+in [reproducibility](reproducibility.md).
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-python -m pip check
-trex --help
-```
+Install Git and Git LFS on both login and compute nodes. Backend revision checks
+invoke Git and may need its LFS filter even when weights were downloaded
+separately. Also make `bash`, `curl`, and the Slurm commands available. Check
+`git lfs version` inside a compute allocation as well as on the login node.
 
-The editable install links commands to this checkout, keeping executed source
-identity consistent with `backends.repo_root`. Keep the checkout in place.
-A regular wheel install also supports archive analysis; use the checkout install
-for the campaign and Slurm instructions in this guide.
+## Controller and LLM environment
 
-This installs the controller and archive-analysis commands. It does not install
-scientific backends, model weights or vLLM. Try the
-[CPU analysis example](../examples/analysis_demo/README.md) before setting up GPUs.
-For development and the complete release gate, see [development](development.md).
+On Linux x86_64, use an NVIDIA driver compatible with PyTorch 2.10.0's CUDA
+12.8 build, a CUDA toolkit (`nvcc`) and a C++ compiler. FlashInfer builds kernels
+on its first run. Load your site's CUDA module or set `CUDA_HOME`; keep the
+venv and its base Python on compute-node-accessible storage.
 
-## Requirements for a campaign
-
-A complete campaign needs the external environments and assets below. Keep
-backend environments separate: the controller launches their configured
-executables. Install the dependencies required by your enabled action families;
-the paper profile uses all eight families.
-
-| Component | Required for |
-| --- | --- |
-| Complexa generation environment and weights | Four Complexa generation search variants |
-| BindCraft environment and assets | BindCraft generation |
-| BoltzGen environment and checkpoints | BoltzGen generation |
-| AF2 / ProteinMPNN asset environment | Standardized evaluation / sequence redesign |
-| Foldseek and MMseqs2 | Structural and sequence clustering |
-| LLM endpoint and local model identity manifest | Planner and Supervisor in the YAML campaign workflow |
-| Target structure and constraints | Every campaign |
-
-Generation outputs can require standardized AF2 evaluation, so choosing a
-generation backend does not necessarily remove the AF2 dependency. The strict
-preflight resolves these dependencies from the enabled families.
-
-Source checkouts provide the Slurm templates and examples. Wheels include
-target constraints, reproducibility manifests, the tested BindCraft patch and
-the canonical prompt snapshot. Both installation modes require external
-backend environments, target structures and model/checkpoint assets.
-
-For Slurm, the virtual environment **and its base Python executable** must be
-accessible on compute nodes. Use a cluster module or Python installed on shared
-storage; a venv pointing to a login node's `/tmp` will not work on compute nodes.
-
-## Local vLLM controller environment
-
-
-For the exact local-vLLM environment used in production:
+From the T-REX checkout, create a separate serving environment:
 
 ```bash
-python -m venv .venv-controller
-source .venv-controller/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r config/trex/controller_requirements.lock.txt
-python -m pip install -e .
+python -m pip install 'uv==0.11.1'
+uv venv --python 3.12.13 .venv-serving
+uv pip sync --python .venv-serving/bin/python \
+  config/trex/serving_requirements.lock.txt
+uv pip install --python .venv-serving/bin/python --no-deps -e .
+uv pip check --python .venv-serving/bin/python
 ```
 
-The lock captures resolved package versions but is not a cross-platform wheel
-lock. It was tested on Linux, Python 3.12.13, CUDA-enabled H100 nodes, vLLM
-0.19.0, and PyTorch 2.10.0. Rebuilding on a different CUDA/driver stack can
-require compatible wheels and is a distinct environment.
+This profile pins 179 dependencies, including vLLM 0.19.0, PyTorch 2.10.0,
+Transformers 4.57.6 and NumPy 2.2.6. It is the default in `.env.example`.
+The launcher activates the environment so installed tools such as `ninja` are
+on `PATH`.
 
-## Install pinned scientific backends
+The [profile manifest](../config/reproducibility/serving_environment.json)
+records the Python version, lock hash and validation scope.
 
-The tested commits are machine-readable in
-`config/reproducibility/production_stack.json`.
+## Backend source and environments
+
+From the T-REX repository root, fetch the three pinned backend checkouts:
 
 ```bash
 mkdir -p external
-
-git clone https://github.com/NVIDIA-Digital-Bio/Proteina-Complexa \
-  external/Proteina-Complexa
-git -C external/Proteina-Complexa checkout \
-  5ae24b055d828918296f2aad63616b1f4cc0e491
-
-# Separate tested community-model tree for AF2/ProteinMPNN assets.
-git clone https://github.com/NVIDIA-Digital-Bio/Proteina-Complexa \
-  external/Proteina-Complexa-community
-git -C external/Proteina-Complexa-community checkout \
-  d323517efbffe3ea280e4e3d0442b0257a37b5a8
-
+git clone https://github.com/NVIDIA-BioNeMo/Proteina-Complexa external/Proteina-Complexa
+git -C external/Proteina-Complexa checkout 5ae24b055d828918296f2aad63616b1f4cc0e491
 git clone https://github.com/martinpacesa/BindCraft external/BindCraft
-git -C external/BindCraft checkout \
-  b971db42ba6e091afab63ccb30ae02215150a990
-git -C external/BindCraft apply \
-  "$(pwd)/external/patches/bindcraft-production.patch"
-
+git -C external/BindCraft checkout b971db42ba6e091afab63ccb30ae02215150a990
+git -C external/BindCraft apply "$PWD/external/patches/bindcraft-production.patch"
 git clone https://github.com/HannesStark/boltzgen external/BoltzGen
-git -C external/BoltzGen checkout \
-  31d9d9b9c72245b4ed6fe8742d6fbf4e1a3552a0
+git -C external/BoltzGen checkout 31d9d9b9c72245b4ed6fe8742d6fbf4e1a3552a0
 ```
 
-Follow each project's official installation instructions at that revision.
-T-ReX expects:
+The BindCraft patch sets the executable permissions used in the study.
+Then install each backend in its own environment:
 
-- Proteina-Complexa's `env.sh`, generation checkpoints, and executable Python;
-- a legacy/community-model asset tree containing AF2 multimer parameters,
-  ColabDesign, and ProteinMPNN;
-- BindCraft's executable environment plus DSSP and DAlphaBall;
-- the `boltzgen` executable and checkpoint cache;
-- Foldseek; and
-- MMseqs2 for sequence-diversity feedback and final panel analysis.
+| Backend | Setup and path to configure |
+| --- | --- |
+| [Complexa](https://github.com/NVIDIA-BioNeMo/Proteina-Complexa/blob/5ae24b055d828918296f2aad63616b1f4cc0e491/README.md#installation) | Use the compatible installation profile below for generation, AF2 and ProteinMPNN. Set `TREX_COMPLEXA_REPO` and `TREX_COMPLEXA_PYTHON`. |
+| [BindCraft](https://github.com/martinpacesa/BindCraft/blob/b971db42ba6e091afab63ccb30ae02215150a990/README.md#installation) | Use the separate Python 3.10 profile below, or the upstream conda installer. Set `TREX_BINDCRAFT_REPO` and `TREX_BINDCRAFT_ENV` to the resulting environment prefix. |
+| [BoltzGen](https://github.com/HannesStark/boltzgen/blob/31d9d9b9c72245b4ed6fe8742d6fbf4e1a3552a0/README.md#installation) | Use the separate Python 3.12 profile below. Set `TREX_BOLTZGEN_REPO`, `TREX_BOLTZGEN_BIN` and `TREX_BOLTZGEN_CACHE`. Stage weights in that cache before using offline compute nodes. |
 
-The AF2 and ProteinMPNN assets may reside under a second
-`TREX_LEGACY_COMPLEXA_REPO`; the generation checkout remains
-`TREX_COMPLEXA_REPO`. This split matches the tested deployment and avoids
-requiring one Python environment to own all third-party dependencies.
+Use this same public Complexa checkout for AF2/ProteinMPNN. The asset
+configuration command in the README writes both checkout paths to `.env.assets`;
+the campaign's `.env` loads them when you submit.
 
-The exact AF2 and ProteinMPNN asset trees are recorded in
-`config/reproducibility/af2_parameters_manifest.json` and
-`config/reproducibility/proteinmpnn_weights_manifest.json`. The files remain
-under their upstream licenses and are not redistributed.
+Revision preflight verifies the `community_models/colabdesign/` and
+`community_models/ProteinMPNN/` source trees and rejects tracked changes in them.
+The Python selected by `TREX_COMPLEXA_PYTHON` runs generation, AF2 evaluation
+and ProteinMPNN; it must support all three.
 
-## Install Foldseek and MMseqs2
+Backend setup may require additional upstream assets, such as BindCraft's
+DSSP, DAlphaBall and PyRosetta. Complete those installations; the T-REX path
+validator does not replace a backend's installation checks.
 
-Use the official binaries or a cluster module. Prefer exact executable paths:
+## Complexa, AF2 and ProteinMPNN environment
+
+From the T-REX root, install the pinned Linux x86_64 profile into a new directory:
 
 ```bash
-export TREX_FOLDSEEK_BIN=/absolute/path/to/foldseek
-export TREX_MMSEQS_BIN=/absolute/path/to/mmseqs
+python scripts/setup_complexa_env.py \
+  --repo external/Proteina-Complexa --env external/Proteina-Complexa/.venv
 ```
 
-The tested versions are:
+This requires `uv==0.11.1`, installed above. It checks the backend revision,
+applies a dependency-metadata patch, installs the locked dependencies and local
+ColabDesign, and checks dependency compatibility, imports and the Complexa CLI.
+It refuses to replace an existing environment that it did not create. Select a
+new `--env` path if you already have an upstream environment, and use that path
+for `TREX_COMPLEXA_PYTHON` and Complexa's `UV_VENV` setting.
 
-- Foldseek `8dc75c74ad0eddab73cfd905963d13bf74dc012b`
-- MMseqs2 `76da68ad7577378410c075049e18666fcc94f8d1`
+The [profile](../config/reproducibility/complexa_environment.json) records source
+revisions, dependency metadata, lock hashes and validation scope.
 
-On module-based clusters the Slurm template also accepts
-`TREX_FOLDSEEK_MODULE` and `TREX_MMSEQS_MODULE`.
-
-## Stage target structures
-
-Target PDB files are not duplicated in this repository. Point
-`TREX_TARGET_ASSET_ROOT` at a tree matching `config/targets/registry.json`.
-The exact registered structures are checked against
-`config/targets/assets.sha256.json`.
+Create Complexa's runtime configuration template:
 
 ```bash
-export TREX_TARGET_ASSET_ROOT=/path/to/Proteina-Complexa/assets/target_data
-trex-validate --target cd45 --asset-root "$TREX_TARGET_ASSET_ROOT"
+(
+  cd external/Proteina-Complexa
+  source .venv/bin/activate
+  complexa init
+)
 ```
 
-Do not substitute a different crop, chain assignment, repaired structure, or
-PDB revision while retaining the same benchmark target name. Register it as a
-new target and report the new SHA256.
+Edit `external/Proteina-Complexa/.env` before generating `env.sh`.
+Set `LOCAL_CODE_PATH` to its absolute checkout path,
+`LOCAL_DATA_PATH` to the absolute `T-REX-assets/targets` directory and
+`LOCAL_CHECKPOINT_PATH` to its `ckpts` directory. For the uv runtime, configure
+`UV_FOLDSEEK_EXEC`, `UV_MMSEQS_EXEC` and `UV_DSSP_EXEC` with absolute executable
+paths. These generate the corresponding runtime variables. `UV_SC_EXEC` is
+needed if you enable optional shape-complementarity evaluation; the default
+T-REX generation configuration uses the AF2 reward without that optional
+bioinformatics reward. Install the tools described in
+[local LLM and clustering tools](#local-llm-and-clustering-tools) and use their
+actual executable paths here. T-REX's root `.env` holds the campaign settings;
+this backend `.env` holds Complexa's runtime paths.
 
-## Stage the LLM
+After saving the backend `.env`, generate `env.sh`:
 
-The checked-in manifest describes `Qwen/Qwen3.6-27B-FP8` at upstream revision
-`ec4160bf26124fa57e6451d070ee0c459a36d5b7`. Its content digest is:
+```bash
+(
+  cd external/Proteina-Complexa
+  source .venv/bin/activate
+  complexa init uv
+)
+```
+
+T-REX sources this `env.sh` before generation. If you chose a different
+Complexa environment directory, use its activation script in both commands.
+
+After [asset configuration](assets.md#connect-assets-to-backend-checkouts), run
+this inside a GPU allocation with at least 64 GB host RAM:
+
+```bash
+external/Proteina-Complexa/.venv/bin/python scripts/check_complexa_env.py \
+  --repo external/Proteina-Complexa --gpu \
+  --checkpoint-root ../T-REX-assets/checkpoints --report complexa-check.json
+```
+
+This checks PyTorch and JAX GPU execution, companion libraries, AF2 parameter
+loading, and loading the Complexa generator and autoencoder onto the GPU. It
+does not generate a binder or validate an entire campaign. Omit `--gpu` and
+`--checkpoint-root` for dependency/import checks on a login node.
+
+## BindCraft environment
+
+From the T-REX root, use a new environment path. PyRosetta is separately licensed;
+ensure that your use is covered by its upstream license before downloading it.
+The command below uses the official quarterly release wheel index.
+
+```bash
+uv venv --python 3.10.20 external/BindCraft/.venv
+uv pip sync --python external/BindCraft/.venv/bin/python \
+  config/trex/bindcraft_requirements.lock.txt \
+  --find-links https://west.rosettacommons.org/pyrosetta/quarterly/release.cxx11thread.serialization
+uv pip check --python external/BindCraft/.venv/bin/python
+```
+
+This profile pins 74 packages, including NumPy 1.26.4, JAX 0.6.0, Flax 0.9.0,
+Optax 0.2.8 and the recorded PyRosetta quarterly build. ColabDesign and PDBFixer
+are pinned to Git commits. The checkout supplies DSSP and DAlphaBall; verify
+that their shared-library dependencies are available on your compute nodes.
+Asset configuration supplies the AF2 parameters separately.
+
+T-REX isolates backend CUDA libraries from the serving toolkit. When invoking
+BindCraft directly, use its environment's library path instead of inheriting
+another toolkit's `LD_LIBRARY_PATH`.
+
+Set `TREX_BINDCRAFT_ENV` to the absolute path of `external/BindCraft/.venv`.
+The upstream `install_bindcraft.sh` instead creates a conda environment named
+`BindCraft`; do not run it over an existing environment you need to preserve.
+If you use that installer, pin ColabDesign as described below.
+
+## BoltzGen environment
+
+From the T-REX root:
+
+```bash
+uv venv --python 3.12.13 external/BoltzGen/.venv
+uv pip sync --python external/BoltzGen/.venv/bin/python \
+  config/trex/boltzgen_requirements.lock.txt
+uv pip install --python external/BoltzGen/.venv/bin/python \
+  --no-deps -e external/BoltzGen
+uv pip check --python external/BoltzGen/.venv/bin/python
+```
+
+This compatible profile pins 101 dependencies plus the pinned local backend.
+It includes PyTorch 2.14.0 with CUDA 13 runtime libraries and NumPy 2.0.2;
+check driver compatibility on your GPU nodes. Set `TREX_BOLTZGEN_BIN` to the absolute
+`external/BoltzGen/.venv/bin/boltzgen` path. CUDA arithmetic alone does not
+validate BoltzGen model inference.
+
+## Check each backend environment
+
+From the T-REX root, check the environments created above:
+
+```bash
+uv pip check --python external/Proteina-Complexa/.venv/bin/python
+uv pip check --python external/BindCraft/.venv/bin/python
+uv pip check --python external/BoltzGen/.venv/bin/python
+```
+
+If you installed an environment elsewhere, replace its interpreter path with
+the one you selected. These commands can run before the campaign `.env` exists.
+
+BindCraft's upstream installer does not pin ColabDesign. In the activated
+BindCraft environment, install the recorded package source and verify its weights:
+
+```bash
+python -m pip install 'colabdesign @ git+https://github.com/sokrypton/ColabDesign.git@e31a56fe1d9b4de25c8697f3a28b75892941cc72'
+python -m pip check
+python /absolute/path/to/T-REX/scripts/manage_assets.py verify-bindcraft \
+  --python /absolute/path/to/BindCraft/environment/bin/python
+```
+
+The package supplies its own converted ProteinMPNN weights (`.pkl`) and a small
+AF2 template array; the asset bundle retains matching copies. They are distinct
+from the separate PyTorch ProteinMPNN weights (`.pt`). The verifier checks package
+metadata and file hashes without loading models. Backend inference still needs
+its own smoke test after dependency changes. Official repositories and research
+references are in [upstream citations](citations.md).
+
+## Checkpoint locations
+
+The [asset setup guide](assets.md) collects the exact checkpoint files in one
+folder and provides download, SHA256 verification and path-configuration tools:
+
+```bash
+python scripts/manage_assets.py fetch --root ../T-REX-assets
+python scripts/manage_assets.py verify --root ../T-REX-assets
+```
+
+This downloads about 52.0 GB. Use `--component targets` for target structures
+alone. Install the backend software separately as described above.
+
+Run `manage_assets.py configure` as shown in the asset guide, then copy
+[.env.example](../.env.example) to `.env` and set the executable paths. The launcher resolves
+some checkpoints relative to their backend trees; these locations must contain
+the files or symlinks to them:
+
+| Asset | Required location |
+| --- | --- |
+| Complexa generator | `$TREX_COMPLEXA_REPO/ckpts/complexa.ckpt` |
+| Complexa autoencoder | `$TREX_COMPLEXA_REPO/ckpts/complexa_ae.ckpt` |
+| AF2 parameters | `$TREX_LEGACY_COMPLEXA_REPO/community_models/ckpts/AF2/` |
+| ProteinMPNN weights | `$TREX_LEGACY_COMPLEXA_REPO/community_models/ProteinMPNN/vanilla_model_weights/` |
+| BindCraft AF2 parameters | Its upstream-configured parameter directory |
+| BoltzGen weights/cache | `$TREX_BOLTZGEN_CACHE` (create and populate this directory) |
+| Qwen model snapshot | `$TREX_QWEN_MODEL_PATH` |
+
+If Complexa downloads weights elsewhere, link the two files into its `ckpts/`
+directory. Configure Complexa's own `.env` for its target-data, AF2 and tool
+paths as well; the launcher sources its `env.sh`. T-REX's `.env` configures
+the controller and does not replace backend configuration.
+
+AF2 and ProteinMPNN file names, sizes and SHA256 hashes are recorded in
+[af2_parameters_manifest.json](../config/reproducibility/af2_parameters_manifest.json)
+and [proteinmpnn_weights_manifest.json](../config/reproducibility/proteinmpnn_weights_manifest.json).
+The ProteinMPNN tree includes `v_48_002.pt`, `v_48_010.pt`, `v_48_020.pt` and
+`v_48_030.pt`. These assets remain under their upstream licenses.
+
+## CD45 input
+
+The included constraint is [config/targets/cd45.json](../config/targets/cd45.json).
+Its target label is `cd45`, and its recorded target ID is `05_CD45`.
+After asset configuration, set `TARGET=cd45` in the campaign `.env`.
+The generated `.env.assets` supplies `TREX_TARGET_ASSET_ROOT`; the launcher
+selects `bindcraft_targets/CD45.pdb` under that root and the included target
+constraints automatically. Explicit `TREX_TARGET_PDB` or `TREX_TARGET_CONFIG`
+values override this lookup; use them only when intentionally selecting a
+different input, as described in the [custom-target guide](../examples/custom_target/README.md).
+
+Use the CD45 structure from the study's target-data tree, with the original
+chains and residue numbering. Its expected size is 115,829 bytes and SHA256 is:
 
 ```text
-77409ac00f81e48d29b9f079ab448044a5ec1cdd91dfdb50b3035c197f065722
+ea9e068e7f44d29d51e05e639bb361015350e26b4efdf45a67f8fc62c624efaa
 ```
 
-Set:
+The registry and hashes are in
+[registry.json](../config/targets/registry.json) and
+[assets.sha256.json](../config/targets/assets.sha256.json).
+The exact CD45 bytes are available through the [asset collection](assets.md),
+under `targets/bindcraft_targets/CD45.pdb`. The downloader uses a public
+Complexa revision verified to contain the same bytes.
+A different PDB crop is a different input, even if it has the same target name.
+
+## Local LLM and clustering tools
+
+The environment installed above contains vLLM 0.19.0 and PyTorch 2.10.0.
+
+Download the full
+[Qwen3.6-27B-FP8 snapshot](https://huggingface.co/Qwen/Qwen3.6-27B-FP8/tree/ec4160bf26124fa57e6451d070ee0c459a36d5b7)
+at revision `ec4160bf26124fa57e6451d070ee0c459a36d5b7`, using the Hugging Face
+CLI from the activated serving environment (skip this download if the asset
+manager has already provided the model):
 
 ```bash
-export TREX_QWEN_MODEL_PATH=/path/to/Qwen3.6-27B-FP8
-export TREX_MODEL_MANIFEST="$PWD/config/trex/qwen3_6_27b_fp8_model_manifest.json"
+source .venv-serving/bin/activate
+hf download Qwen/Qwen3.6-27B-FP8 \
+  --revision ec4160bf26124fa57e6451d070ee0c459a36d5b7 \
+  --local-dir /absolute/path/to/Qwen3.6-27B-FP8
 ```
 
-Startup validates manifest integrity plus every declared file name and byte size
-against the full content-hash manifest. To generate a manifest for a different
-model:
+Set `TREX_QWEN_MODEL_PATH` to that directory and keep the included
+[model manifest](../config/trex/qwen3_6_27b_fp8_model_manifest.json).
+The Slurm script starts the server automatically with context length 65,536,
+GPU-memory utilization 0.90 and thinking disabled.
+The first startup compiles GPU kernels and can take several minutes; subsequent
+starts reuse the compiled cache. Startup logs are saved in the campaign archive.
 
-```bash
-trex-provenance hash-model \
-  --model-path /path/to/model \
-  --out /path/to/model-manifest.json
-```
+Install [Foldseek](https://github.com/steineggerlab/foldseek) and
+[MMseqs2](https://github.com/soedinglab/MMseqs2), then set their absolute
+executable paths in `TREX_FOLDSEEK_BIN` and `TREX_MMSEQS_BIN`.
+Recorded versions are `8dc75c74ad0eddab73cfd905963d13bf74dc012b` and
+`76da68ad7577378410c075049e18666fcc94f8d1`, respectively.
+Foldseek is required for structural uniqueness; MMseqs2 provides sequence
+diversity and is also used by the panel command.
 
-Revalidate every model byte for a release audit with:
-
-```bash
-trex-provenance model-digest \
-  --model-path "$TREX_QWEN_MODEL_PATH" \
-  --manifest "$TREX_MODEL_MANIFEST" \
-  --full-content
-```
-
-Changing the model or manifest defines a distinct experiment.
-
-## Configure paths
-
-```bash
-cp .env.example .env
-# Edit all paths.
-set -a
-source .env
-set +a
-```
-
-`.env` is not parsed automatically. The `set -a`/`set +a` pair exports its
-assignments to the controller and worker subprocesses.
-
-## Fail-closed preflight
-
-```bash
-trex-validate \
-  --target cd45 \
-  --asset-root "$TREX_TARGET_ASSET_ROOT" \
-  --enabled-families "$TREX_ENABLED_FAMILIES" \
-  --require-backends \
-  --require-model \
-  --verify-backend-revisions
-```
-
-Add `--verify-checkpoint-content` for the slower release audit that rehashes the
-Qwen, AF2, and ProteinMPNN files. The reference
-`slurm/publication_preflight.slurm` enables this mode.
-
-The preflight accepts a separate `TREX_TEST_PYTHON` with `.[dev]` installed for
-pytest and deterministic replays. `TREX_VALIDATION_PYTHON` may remain the lean
-production controller environment; test-only packages do not need to be added
-to it.
-
-The command performs no GPU work. It validates:
-
-- target registry/config/PDB identity, chains, hotspots, and SHA256;
-- only the backends required by enabled families;
-- generation checkpoints, AF2 parameters, and ProteinMPNN weights;
-- Foldseek and optional MMseqs2 executables;
-- the local model manifest; and
-- pinned backend Git revisions when requested.
-
-An enabled-family failure is fatal. An unavailable optional MMseqs2 binary is a
-warning because it disables sequence-diversity evidence without changing the
-strict SU endpoint.
-
-## Slurm smoke and launch
-
-```bash
-bash -n slurm/trex_per_target_node.slurm
-mkdir -p slurm_logs
-export TARGET=cd45
-sbatch --export=ALL slurm/trex_per_target_node.slurm
-```
-
-The template deliberately omits site-specific account, partition, QOS, and
-reservation directives. Supply them at submission. The default layout is the
-paper-reference four-GPU job: GPU 0 hosts the local LLM and GPUs 1-3 are worker
-slots. To scale the same controller to a larger node, request more GPUs from
-Slurm, set `TREX_WORKER_GPUS` to the worker indices, and set
-`TREX_REQUIRE_THREE_WORKERS=0`:
-
-```bash
-export TREX_WORKER_GPUS=1,2,3,4,5,6,7
-export TREX_REQUIRE_THREE_WORKERS=0
-export TREX_CHARGED_GPUS=8  # optional raw audit metadata only
-sbatch --gres=gpu:8 --export=ALL slurm/trex_per_target_node.slurm
-```
-
-Always export comma-separated values in the shell and submit with
-`--export=ALL`. Do not write a comma-valued `TREX_WORKER_GPUS` or
-`TREX_ENABLED_FAMILIES` assignment inside `sbatch --export=...`; Slurm parses
-those commas as variable separators and can silently retain only the first
-GPU or family.
-
-### Optional smoke checks
-
-Use subshells for optional examples so their overrides do not affect the
-subsequent production run. Create `slurm_logs/` before submitting any job.
-
-Before spending a full campaign budget, verify a scaled Slurm allocation and
-per-worker GPU mapping without loading an LLM or scientific backend:
-
-```bash
-(
-  mkdir -p slurm_logs
-  export TREX_WORKER_GPUS=1,2,3,4,5,6,7
-  export TREX_TEST_PYTHON=/path/to/trex-dev/bin/python
-  sbatch --gres=gpu:8 --export=ALL slurm/multigpu_smoke.slurm
-)
-```
-
-This bounded smoke checks all requested GPU indices, unique device UUIDs,
-worker-wall scaling, event-driven slot behavior, and Selector behavior. It does
-not claim an end-to-end molecular result; use a short target campaign after it
-when validating a new hardware/backend stack.
-
-By default the smoke expects every allocated GPU except GPU 0 to be a worker;
-this catches a comma-truncated `TREX_WORKER_GPUS`. Set
-`TREX_EXPECTED_WORKER_COUNT` only when intentionally testing a smaller subset.
-
-For the follow-up end-to-end stack check, use the production launcher with a
-bounded controller budget:
-
-```bash
-(
-  mkdir -p slurm_logs
-  export TARGET=cd45
-  export TREX_MAX_WALL_H=0.65
-  export TREX_ENABLED_FAMILIES=complexa_beam,complexa_best_of_n,complexa_fk_steering,structure_refilter
-  sbatch --time=01:00:00 --export=ALL slurm/trex_per_target_node.slurm
-)
-```
-
-This assumes the site-specific paths above pass strict preflight. Startup
-consumes scheduler time and shutdown waits are sequential, so a short allocation
-does not guarantee that all work finishes. Inspect process exits and archive
-validation before interpreting the result. This bounded stack check does not
-establish reproduction of a full campaign.
-
-The reference full campaign uses 48 cumulative controller hours and a 49-hour
-Slurm reservation, with the reporting denominator kept at 144 worker GPU-hours
-for three worker slots. See the
-[timing contract](reproducibility.md#execution-timing-and-shutdown).
-
-## Installation boundaries
-
-The repository cannot legally or practically contain AF2/model weights, backend
-checkpoints, or every official backend environment. A checkout is therefore
-not a one-command molecular-design appliance. The complete, testable contract
-is the combination of:
-
-1. this source revision;
-2. `production_stack.json`;
-3. target and model content manifests;
-4. the external licensed assets;
-5. successful `trex-validate --require-backends --require-model`; and
-6. the per-run `run_provenance.json`.
+Continue with [CD45 configuration, preflight and Slurm submission](slurm.md).

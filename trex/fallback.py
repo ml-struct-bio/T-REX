@@ -1,16 +1,7 @@
-"""Deterministic fallback: state-conditioned mode mixtures + clamps.
+"""State-conditioned fallback mixtures and allocation bounds.
 
-Used when:
-  - planner/supervisor LLM output is invalid, abstaining, empty, or timed out
-  - LLM backend is in cooldown
-  - testing fallback-only arm (Phase 7)
-
-Low confidence does not invalidate an otherwise valid output; it is retained and
-may activate conditional deterministic bounds.
-
-The state classifier itself is in `evidence_reducer.py` (closer to the
-reduction logic). This module owns: (a) state → default mixture lookup,
-(b) clamps, (c) within-fallback ranking helpers.
+Used for invalid, unavailable, or empty LLM decisions and fallback-only comparisons. Low
+confidence can activate bounds without invalidating an otherwise valid output.
 """
 
 from __future__ import annotations
@@ -25,11 +16,8 @@ CONFIDENT_MIXTURE_THRESHOLD = 0.65
 
 DEFAULT_MIXTURES: dict[StateLabel, dict[str, float]] = {
     "productive": {"exploit": 0.65, "rescue": 0.25, "explore": 0.10},
-    # productive_duplicate (F6): winning generator but duplicate-collapsing —
-    # keep exploiting it, push the freed mass to rescue (intra-family structural
-    # diversification: sc_scale_noise / beam_width / epitope-contact tweaks), NOT
-    # cross-family explore. Strictly exploit-leaning so a fallback tick over a
-    # producing lane does not bleed budget off the family that is buying SU.
+    # Retain exploitation while allowing refinement of a productive but repetitive
+    # route.
     "productive_duplicate": {"exploit": 0.55, "rescue": 0.35, "explore": 0.10},
     # strict_duplicate_collapse: raw strict success is cheap to reproduce but not
     # turning into official SU. Stop polishing the same structural basin; spend
@@ -38,13 +26,8 @@ DEFAULT_MIXTURES: dict[StateLabel, dict[str, float]] = {
     "strict_duplicate_collapse": {"exploit": 0.10, "rescue": 0.15, "explore": 0.75},
     "rescue_rich": {"exploit": 0.30, "rescue": 0.50, "explore": 0.20},
     "stalled": {"exploit": 0.20, "rescue": 0.35, "explore": 0.45},
-    # deep_stall (F5): long no-new-SU plateau. SOFT explore lean, NOT a hard
-    # override — the archive analysis showed the real escape blocker on collapsed
-    # targets was FEASIBILITY (route_cap saturated by the refilter flood blocked
-    # explore candidates: CbAgo explore target 0.37 realised only 0.24, 100/372
-    # explore candidates rejected on route_cap_ok), not the explore RATIO. The
-    # deterministic chain throttle drains that backlog so the LLM's already-
-    # explore-leaning mixture becomes realisable; this state only adds a floor.
+    # Bias prolonged stalls toward exploration while dispatch throttles control
+    # evaluation backlogs.
     "deep_stall": {"exploit": 0.20, "rescue": 0.30, "explore": 0.50},
     "low_evidence": {"exploit": 0.35, "rescue": 0.30, "explore": 0.35},
 }
@@ -63,10 +46,7 @@ class Clamp:
 
 
 DEFAULT_CLAMPS: dict[StateLabel, Clamp] = {
-    # Productive: V6.3 lesson — CD45-style targets were hurt by forced
-    # exploration. Cap explore at 0.20 so LLM creep cannot waste budget on
-    # novel methods when the current family is producing structure-unique
-    # successes. Small explore floor (0.05) preserves diversity insurance.
+    # Limit exploration in productive campaigns while retaining a nonzero exploration share.
     "productive": Clamp(
         exploit_min=0.45,
         exploit_max=0.80,
@@ -74,9 +54,6 @@ DEFAULT_CLAMPS: dict[StateLabel, Clamp] = {
         explore_min=0.05,
         explore_max=0.20,
     ),
-    # productive_duplicate (F6): keep exploit hot (the lane is buying SU) but give
-    # rescue room for intra-family structural diversification; cap explore so the
-    # LLM doesn't pivot to novel families when the issue is structural redundancy.
     "productive_duplicate": Clamp(
         exploit_min=0.40,
         exploit_max=0.70,
@@ -89,31 +66,18 @@ DEFAULT_CLAMPS: dict[StateLabel, Clamp] = {
         rescue_max=0.30,
         explore_min=0.55,
     ),
-    # deep_stall (F5) Category-B (fires on confirmed collapse/low-conf): firmer
-    # explore floor once collapse is corroborated, but still not a hard override.
     "deep_stall": Clamp(exploit_max=0.30, rescue_min=0.15, explore_min=0.45),
     # Rescue-rich: rescue is the primary path; cap explore so the LLM
     # doesn't pivot away from the rescue lane that the evidence supports.
     "rescue_rich": Clamp(rescue_min=0.40, explore_max=0.30),
     # Stalled: explore is desired here. No upper bound on explore.
     "stalled": Clamp(exploit_max=0.35, rescue_min=0.25, explore_min=0.25),
-    # Low evidence: let the LLM decide, but keep ONLY a tiny explore floor (v7_3)
-    # so the diversity-insurance budget is realizable on BOTH the Category-A and
-    # Category-B paths. Previously empty Clamp() — the only state where a
-    # sub-~0.05 explore share passed unclamped and then K-window-starved to 0.
     "low_evidence": Clamp(explore_min=0.05),
 }
 
 
 def describe_clamp_for_prompt(state: "StateLabel") -> str:
-    """Human-readable mode_mixture range guidance for the Supervisor prompt.
-
-    Option C (2026-05-28): the Supervisor is now asked to emit a mixture that
-    ALREADY respects the per-state strategy ranges, so the deterministic clamp
-    becomes a rarely-binding safety net rather than a frequent override. Single
-    source of truth = DEFAULT_CLAMPS, so the prompt guidance and the enforced
-    clamp can never drift apart.
-    """
+    """Render Supervisor allocation guidance from the same bounds used by the controller."""
     c = DEFAULT_CLAMPS.get(state, Clamp())
     parts: list[str] = []
     for mode, lo, hi in (
@@ -134,23 +98,13 @@ def describe_clamp_for_prompt(state: "StateLabel") -> str:
     return "; ".join(parts)
 
 
-# §22.8.4: Category A clamps — bug+budget safety floors only.
-# Applied unconditionally on every supervisor output. These guarantee
-# the launched mixture is never pathological (no all-exploit-no-explore
-# in productive, no all-explore-no-exploit in productive, etc.) but
-# leave room for the LLM to express high-conviction allocations
-# (e.g., {exploit:0.90, rescue:0.05, explore:0.05}).
-#
-# The wider DEFAULT_CLAMPS above are Category B (strategy-shaping) and
-# are now only applied when the gating signals fire (see
-# `should_apply_category_b_clamps`).
+# Unconditional bounds leave allocation freedom within minimum safeguards. Stronger
+# state-dependent bounds apply only when their triggers fire.
 CATEGORY_A_CLAMPS: dict[StateLabel, Clamp] = {
     # Productive: keep a tiny exploit ceiling so a degenerate
     # mixture (e.g. {exploit:1.0}) never goes through, and a tiny
     # explore floor so the diversity insurance is preserved.
     "productive": Clamp(exploit_max=0.95, explore_min=0.05),
-    # productive_duplicate (F6): same degenerate-prevention floors as productive —
-    # the LLM owns the diversify-in-place split within these loose bounds.
     "productive_duplicate": Clamp(exploit_max=0.90, explore_min=0.05),
     "strict_duplicate_collapse": Clamp(exploit_max=0.30, explore_min=0.45),
     "rescue_rich": Clamp(rescue_min=0.10),
@@ -158,28 +112,12 @@ CATEGORY_A_CLAMPS: dict[StateLabel, Clamp] = {
     # clamps ARE the diversity-collapse response. See
     # `should_apply_category_b_clamps` (returns True for stalled).
     "stalled": Clamp(exploit_max=0.35, rescue_min=0.25, explore_min=0.25),
-    # deep_stall (F5) Category-A always-on insurance: a 0.35 explore FLOOR so the
-    # slots freed by the chain throttle reliably go to fresh exploration rather
-    # than re-exploiting the dead lane — but the confident LLM's mixture is still
-    # honored above this floor (deep_stall is NOT in the always-Cat-B set), since
-    # the analysis shows the LLM reacts correctly under collapse (it already
-    # targets high explore); the throttle + this floor are the insurance.
+    # Maintain an exploration floor during deep stall.
     "deep_stall": Clamp(exploit_max=0.40, explore_min=0.35),
-    # low_evidence (v7_3 2026-06-10): a tiny explore floor (matching productive)
-    # so the diversity-insurance budget is REALIZABLE. Previously empty Clamp(),
-    # which was the ONLY state where a sub-~0.05 explore share passed through
-    # unclamped and then K-window-starved to exactly 0 (the residual quantization
-    # bug). 0.05 reliably realizes ~1 explore launch per ~10-20 ticks. In a
-    # cold/uncertain state a guaranteed minimum exploration is the desired prior.
     "low_evidence": Clamp(explore_min=0.05),
 }
 
-# Diversity-collapse response (2026-06-13). The old collapse trigger was 0.70,
-# but live CD45 (9630421) collapsed to top_bin_share ~0.44-0.50 while explore was
-# held at 0.10-0.15 (productive_duplicate floor 0.05) — the controller SAW the
-# collapse but under-responded, re-mining one Foldseek basin. Trigger the
-# diversity response at 0.50 and FORCE an explore floor (raise explore_min, not
-# just loosen the cap) so budget actually moves off the collapsing basin.
+# Raise the exploration floor when structural concentration crosses this threshold.
 DIVERSITY_COLLAPSE_TOP_BIN = 0.50
 DIVERSITY_COLLAPSE_EXPLORE_FLOOR = 0.20
 # rescue_rich uses a deliberately HIGHER collapse bar than productive states: it
@@ -201,45 +139,18 @@ def should_apply_category_b_clamps(
     supervisor_used: bool,
     panel_live: bool = False,
 ) -> tuple[bool, list[str]]:
-    """§22.8.4 gating policy.
+    """Return whether conditional allocation bounds apply and the triggering reasons.
 
-    Returns (apply, reasons). When `apply` is False, the Selector uses
-    `CATEGORY_A_CLAMPS` (bug+budget only) — honoring the LLM's mixture
-    within ±safety floors. When True, the full `DEFAULT_CLAMPS` set
-    (strategy-shaping) applies as before.
-
-    Always True for:
-      - `stalled` state (the Category B set IS the stalled response)
-      - any path that used fallback (no LLM mixture to honor)
-
-    Otherwise True iff any collapse / low-confidence signal fires:
-      - `top_bin_share >= DIVERSITY_COLLAPSE_TOP_BIN (0.50)`  (mode collapse)
-      - `panel_ready_bins_covered < K/2`   (panel shallow; only when panel_live)
-      - `supervisor_confidence < CONFIDENT_MIXTURE_THRESHOLD`     (LLM unsure)
-      - `recent_fallback_high`             (recent ticks fell back)
-
-    BUG FIX (2026-05-28): the panel-coverage trigger is gated behind
-    `panel_live`. PanelValue@K is deferred (doc §12) — `panel.select_panel`
-    only runs at end-of-campaign consolidate and every parser hard-codes
-    `panel_ready=False`, so in production `panel_ready_bins_covered` is a
-    CONSTANT 0. With the trigger always live, `0 < K/2` fired every tick,
-    forcing Category B on unconditionally and making the Option-C "LLM owns
-    the allocation within stated bounds" design inert (a confident productive
-    mixture was never honored within the wider Category A floors). Gating it
-    behind `panel_live` (default False until the live panel selector is
-    wired) restores LLM agency; the remaining genuine signals (collapse,
-    low confidence, recent fallback, stalled) still trip Category B.
+    Fallback and stalled states always apply them. Otherwise evaluate structural
+    concentration, enabled live-panel coverage, Supervisor confidence, and recent
+    fallback frequency. Without a trigger, use the unconditional safety bounds.
     """
     reasons: list[str] = []
     # Fallback path: no LLM mixture to respect, always clamp.
     if not supervisor_used:
         return True, ["fallback_path"]
-    # Stalled always clamps (the clamps ARE the stalled response). deep_stall is
-    # deliberately NOT here: the archive analysis showed the LLM reacts correctly
-    # under collapse (targets high explore) — the escape blocker was feasibility,
-    # fixed by the chain throttle + the Cat-A explore floor — so we preserve the
-    # confident LLM's mixture and only force Cat-B when collapse/low-conf is
-    # corroborated by the triggers below (which on a real deep_stall usually fire).
+    # Always apply the stalled-state clamps. For deep_stall, apply conditional clamps
+    # only when the evidence or confidence checks below require them.
     if state == "stalled":
         return True, ["state_stalled"]
     if state == "strict_duplicate_collapse":
@@ -308,21 +219,11 @@ def diversity_adjusted_clamp(
         collapse_share = strict_su_top_bin_share
         collapse_label = "strict_su_top"
     if state in ("productive", "productive_duplicate") and collapse_share is not None:
-        # 2026-05-29: gate the panel-coverage trigger behind panel_live
-        # (consistent with should_apply_category_b_clamps). PanelValue@K is
-        # deferred so panel_ready_bins_covered is constant 0 → without the gate
-        # `bin_coverage_short` was ALWAYS True, loosening the productive clamps
-        # on every productive tick regardless of real structural collapse. Now
-        # the loosening fires only on the genuine top_bin_share>=0.50 signal
-        # (or shallow panel coverage once a live panel selector is wired).
+        # Use panel coverage only when live panel selection is enabled.
         bin_coverage_short = panel_live and panel_ready_bins_covered < panel_size_K // 2
         if collapse_share >= DIVERSITY_COLLAPSE_TOP_BIN or bin_coverage_short:
-            # FORCE a diversity pivot: raise the explore FLOOR (not just loosen the
-            # cap) so the controller moves budget OFF the collapsing basin instead
-            # of merely being allowed to. exploit_max 0.60 (was 0.65) so the
-            # explore floor 0.20 + base rescue floor 0.20 is FEASIBLE (0.60+0.20+
-            # 0.20=1.0); a 0.65 cap left explore renormalized below its floor.
-            # exploit stays the majority lane so it still mints SU. explore cap ->0.40.
+            # Raise the exploration floor under structural concentration. An exploitation cap
+            # of 0.60 leaves room for exploration and rescue floors of 0.20 each.
             adjusted = Clamp(
                 exploit_min=base.exploit_min,
                 exploit_max=0.60 if base.exploit_max else None,
@@ -347,7 +248,7 @@ def diversity_adjusted_clamp(
     ):
         adjusted = Clamp(
             rescue_min=base.rescue_min,
-            explore_max=0.50,  # was 0.30
+            explore_max=0.50,
         )
         adjustments.append(
             f"diversity_loosen_rescue({collapse_label}={collapse_share:.2f})"
@@ -376,25 +277,11 @@ def clamp_mixture(
     category_b_enabled: bool = True,
     panel_live: bool = False,
 ) -> tuple[dict[str, float], list[str]]:
-    """Apply per-state clamps with proper feasibility-preserving normalization.
+    """Apply allocation bounds while preserving normalization.
 
-    Algorithm: pin clamped (floor or ceiling) entries to their bounds,
-    then distribute remaining mass proportionally over the unpinned
-    entries. Iterates until fixed-point or max 5 passes to handle the
-    rare case where renormalization pushes another entry across its
-    bound.
-
-    Diversity-aware loosening (user Q): when top_bin_share signals
-    structural collapse on a productive run, clamps loosen to give
-    the LLM headroom to pivot toward diversity (without removing
-    the safety floors).
-
-    §22.8.4: when `category_b_enabled=False` use `CATEGORY_A_CLAMPS`
-    (bug+budget safety only) so the LLM's supervisor mixture is honored
-    within minimal floors. The Selector gates this via
-    `should_apply_category_b_clamps`.
-
-    Returns (clamped_mixture, applied_clamps_log).
+    Pin out-of-range shares and redistribute remaining mass proportionally until stable.
+    Conditional bounds may loosen under structural concentration. Return the mixture and
+    applied-bound log.
     """
     if category_b_enabled:
         base_clamp = DEFAULT_CLAMPS.get(state, Clamp())
@@ -409,8 +296,7 @@ def clamp_mixture(
         )
         log: list[str] = list(diversity_log)
     else:
-        # §22.8.4: Category-A-only path. No diversity-adjusted loosening
-        # needed — there's no Category B ceiling to loosen.
+        # Unconditional bounds do not need conditional diversity adjustments.
         clamp = CATEGORY_A_CLAMPS.get(state, Clamp())
         log = ["category_b_gated_off"]
 
@@ -427,25 +313,11 @@ def clamp_mixture(
         lo, hi = bounds["rescue"]
         bounds["rescue"] = (None, hi)
 
-    # First pass: clamp any out-of-bound input directly. This produces
-    # the initial pin set.
-    #
-    # BUGFIX (2026-05-28): normalize to sum=1 BEFORE comparing against the
-    # bounds. The Supervisor prompt tells the LLM its mode_mixture "will be
-    # renormalized to sum to 1", so the LLM emits unnormalized values
-    # (observed sums of 13, 100, … in 22-40% of production ticks). The
-    # bounds (e.g. exploit_max=0.80) are fractions, so comparing a raw 40
-    # against 0.80 pinned the mode to its ceiling regardless of the LLM's
-    # actual intent — e.g. {40,20,40} (= intended {0.4,0.2,0.4}) was
-    # mangled to {0.8,0.0,0.2} instead of the correct {0.45,0.35,0.20}.
-    # DEFAULT_MIXTURES already sum to 1, so this is a no-op for the
-    # fallback path.
+    # Normalize before comparing shares with fractional bounds.
     _clipped = {k: max(0.0, v) for k, v in mixture.items()}
     _tot = sum(_clipped.values())
     out = {k: v / _tot for k, v in _clipped.items()} if _tot > 0 else _clipped
-    # Total over the FULL mode domain so the later sum(out[m] ...) over free modes
-    # can't KeyError on a mode-incomplete input (review-found latent defect;
-    # current callers always pass all 3 keys, so this is defensive).
+    # Include every mode so incomplete input mixtures remain well-defined.
     out = {m: out.get(m, 0.0) for m in bounds}
     pinned: dict[str, float] = {}
     for mode, (lo, hi) in bounds.items():
@@ -467,12 +339,7 @@ def clamp_mixture(
                 {m: v / s for m, v in pinned.items()} | {m: 0.0 for m in free_modes}
             ), log
 
-        # Bug fix (edge case 5): all modes pinned at MINs that sum to < 1.0
-        # used to return a non-normalized distribution (e.g. {0.45, 0.10, 0.05}
-        # summing to 0.60). Pure mathematical floors can't be over-satisfied
-        # without violating mins — but practically we want sum=1.0 so the
-        # downstream largest_remainder rounding works. Scale ALL pinned
-        # proportionally and re-check against each mode's max bound.
+        # If all pinned shares sum below one, scale them and recheck upper bounds.
         if not free_modes and pinned_sum > 0 and pinned_sum < 1.0:
             scale = 1.0 / pinned_sum
             candidate = {m: v * scale for m, v in pinned.items()}
@@ -611,12 +478,9 @@ def redistribute_empty_modes(
     for m, n in add.items():
         out[m] += n
 
-    # Smoke 8715062 finding: a feasible mode with a small but non-trivial
-    # original mixture weight (e.g. explore=0.1) can end up with zero
-    # quota after redistribute because largest-remainder favors the
-    # bigger fractional. Protect it: any feasible mode with original
-    # mixture >= MIN_REPRESENTATION_FLOOR that ends up at 0 quota steals
-    # 1 slot from the largest-quota feasible mode (must have >1).
+    # Preserve representation of feasible modes with a nontrivial proposed share.
+    # If rounding gives one such mode no slots, transfer one from the feasible mode
+    # with the largest quota, provided that donor has more than one slot.
     MIN_REPRESENTATION_FLOOR = 0.08
     protected = [
         m

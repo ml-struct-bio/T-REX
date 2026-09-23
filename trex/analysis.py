@@ -1,4 +1,4 @@
-"""Inspect, validate, and audit a T-ReX append-only campaign archive.
+"""Inspect, validate, and audit a T-REX append-only campaign archive.
 
 The commands in this module operate on archived records only.  They never
 modify generated structures, scores, or EvidenceSummary rows.

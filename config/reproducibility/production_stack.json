@@ -4,21 +4,29 @@
     "controller_gpu": 1,
     "worker_gpus": 3,
     "primary_budget_unit": "worker-wall GPU-hour",
-    "primary_foldseek_tm_score": 0.60,
-    "collapse_foldseek_tm_score": 0.60,
+    "primary_foldseek_tm_score": 0.6,
+    "collapse_foldseek_tm_score": 0.6,
     "structure_scope": "binder_chain"
   },
   "components": {
     "proteina_complexa": {
-      "repository": "https://github.com/NVIDIA-Digital-Bio/Proteina-Complexa",
+      "repository": "https://github.com/NVIDIA-BioNeMo/Proteina-Complexa",
       "git_commit": "5ae24b055d828918296f2aad63616b1f4cc0e491",
       "branch_at_capture": "dev",
       "role": "generation plus the Python environment used for AF2/ProteinMPNN dispatch"
     },
     "proteina_complexa_community": {
-      "repository": "https://github.com/NVIDIA-Digital-Bio/Proteina-Complexa",
+      "repository": "https://github.com/NVIDIA-BioNeMo/Proteina-Complexa",
       "git_commit": "d323517efbffe3ea280e4e3d0442b0257a37b5a8",
-      "role": "community-model tree used for AF2 parameters, ColabDesign, and ProteinMPNN"
+      "role": "community-model tree used for AF2 parameters, ColabDesign, and ProteinMPNN",
+      "equivalent_git_commits": [
+        "5ae24b055d828918296f2aad63616b1f4cc0e491"
+      ],
+      "equivalent_source_trees": {
+        "community_models/colabdesign": "844c76c09355e094a29a34c16fead3f63dea3819",
+        "community_models/ProteinMPNN": "6825955f4c3dec0ada2dd0f1a969f61515bd24d2"
+      },
+      "public_install_note": "The public generation commit contains byte-identical tracked ColabDesign and ProteinMPNN source trees. Check those tree IDs and reject tracked changes when using this equivalent checkout; checkpoint contents remain separately verified."
     },
     "bindcraft": {
       "repository": "https://github.com/martinpacesa/BindCraft",
@@ -64,16 +72,19 @@
     "controller_environment": {
       "python": "3.12.13",
       "lock": "config/trex/controller_requirements.lock.txt",
+      "verification_profile": "config/reproducibility/controller_environment.json",
       "vllm": "0.19.0",
       "torch": "2.10.0",
       "openai": "2.32.0",
       "pydantic": "2.13.2",
-      "numpy": "2.4.4"
+      "numpy": "2.4.4",
+      "purpose": "Historical inventory only; not an installation recommendation.",
+      "installation_profile": "config/reproducibility/serving_environment.json"
     }
   },
   "notes": [
     "Target structures are external and are verified by config/targets/assets.sha256.json.",
-    "AF2 multimer parameters and ProteinMPNN weights are external licensed assets and are not redistributed.",
+    "Model weights are distributed separately in T-REX-assets under their upstream licenses; see config/reproducibility/assets_manifest.json.",
     "The controller records the concrete revisions, dirty-diff hashes, target hashes, model hash, and runtime versions in each run_provenance.json."
   ]
 }

@@ -1,8 +1,4 @@
-"""Regression: structure_refilter is a RE-SCORER (0 own SU); a chained refilter
-strict success must be credited to the GENERATING family in the controller's
-primary strict_yield_su ledger, and the SSOT invariant
-(sum of per-family strict_yield_su == #SU clusters) must hold. (v7_3 fix.)
-"""
+"""Test one-owner structural credit attributed through evaluation lineage."""
 from __future__ import annotations
 
 from trex.evidence_reducer import (
@@ -35,10 +31,6 @@ def _refilter(rid, source_id, *, su_bin, parents=None):
         metrics_calibrated={}, route_lineage=[], gpu_h=0.05, exit_status="ok",
         bins={"refilter_source": source_id, "foldseek_su": su_bin},
     )
-
-
-
-
 
 
 def test_raw_strict_records_without_foldseek_su_do_not_mint_su_credit():
@@ -144,9 +136,7 @@ def test_ssot_invariant_sum_equals_su_clusters():
 
 
 def test_effective_provenance_credits_generator_for_all_planner_blocks():
-    # The Planner-facing blocks (recipes/exemplars/strategy_feedback/examples) must
-    # credit the GENERATOR, incl. the Complexa→refilter case the old one-hop
-    # _diagnostic_parent_family dropped (it only handled diagnostic-only parents).
+    # Planner evidence credits the generating family through evaluation lineage.
     from trex.evidence_reducer import (
         _effective_provenance, resolve_generating_record, resolve_generating_family,
     )
@@ -278,9 +268,7 @@ def _roled_refilter(rid, source_id, *, su_bin, role, parents):
 
 
 def test_shared_cluster_owner_is_generator_regardless_of_order():
-    """When a canonical conversion and a parent_model_refold score the SAME
-    Foldseek cluster, the GENERATOR (not structure_refilter) owns the single SU,
-    deterministically — no input-order-dependent flip. SSOT: one cluster, one owner."""
+    """Cluster ownership must not depend on record order."""
     bc = _gen("bc1", "bindcraft")
     canon = _roled_refilter("rf_auto", "bc1", su_bin="cShared",
                             role=CANONICAL_SCORE_CONVERSION, parents=["chain_a", "bc1"])
@@ -291,9 +279,6 @@ def test_shared_cluster_owner_is_generator_regardless_of_order():
         assert mh["bindcraft"].strict_yield_su == 1, order
         assert mh["structure_refilter"].strict_yield_su == 0, order
         assert sum(s.strict_yield_su for s in mh.values()) == 1, order  # one cluster
-
-
-# ---- evidence-3 (2026-06-18): exemplar diagnostic blocker resolved over generator ----
 
 
 def test_exemplar_diagnostic_blocking_axis_uses_generator_record():
@@ -319,8 +304,7 @@ def test_exemplar_diagnostic_blocking_axis_uses_generator_record():
     best = [e for e in build_exemplars([gen, refilter], {}, ReducerConfig())
             if e.kind == "best"]
     assert len(best) == 1
-    # the refilter's own ipTM (0.85) passes its quality band → without the fix this
-    # would be None; with the fix the generator's failing min_ipae surfaces.
+    # The failing generator diagnostic remains visible even when the evaluation ipTM passes.
     assert best[0].diagnostic_blocking_axis == "min_ipae"
     assert best[0].family == "complexa_beam"  # provenance credit unchanged
 
@@ -616,7 +600,6 @@ def test_route_values_mark_promising_unscored_diagnostic_route_as_awaiting_score
     assert family.status == "awaiting_score_conversion"
 
 
-
 def test_route_values_do_not_protect_low_value_bulk_score_conversion_backlog(tmp_path):
     from trex.evidence_reducer import build_route_values
 
@@ -692,7 +675,6 @@ def test_route_values_mark_productive_duplicate_route_as_diversify():
     assert route.strict_count == 5
     assert route.strict_per_su == 5.0
     assert route.status == "diversify"
-
 
 
 def test_route_values_track_gpu_hour_recent_suffix_separately_from_record_window():
@@ -800,7 +782,6 @@ def test_method_health_recent_chained_rate_charges_parent_generator_when_window_
     assert mh.chained_strict_yield_su_recent == 2
     assert abs((mh.chained_su_per_gpu_h_recent or 0.0) - (2.0 / expected_gpu)) < 1e-9
     assert (mh.chained_su_per_gpu_h_recent or 0.0) < 4.0
-
 
 
 def test_route_values_retention_prefers_medium_recent_over_stale_lifetime():

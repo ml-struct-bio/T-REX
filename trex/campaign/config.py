@@ -1,4 +1,4 @@
-"""Load and validate the single-file T-ReX campaign input contract."""
+"""Load and validate the single-file T-REX campaign input contract."""
 
 from __future__ import annotations
 
@@ -412,7 +412,7 @@ def _resolve_backend_environment(
         "boltzgen_repo": boltzgen_repo,
         "boltzgen_binary": choose(
             "boltzgen_binary",
-            external_root / ".venvs" / "boltzgen" / "bin" / "boltzgen",
+            boltzgen_repo / ".venv" / "bin" / "boltzgen",
         ),
         "boltzgen_cache": choose(
             "boltzgen_cache", external_root / "checkpoints" / "boltzgen"

@@ -1,8 +1,4 @@
-"""End-to-end shadow tick: Evidence → Planner → Builder → Supervisor → Selector.
-
-No launches. Outputs a complete tick trace as JSON for replay/audit.
-See plan §17 Phase 0 (replay + shadow).
-"""
+"""Run a decision-only cycle and return its trace without launching workers."""
 
 from __future__ import annotations
 

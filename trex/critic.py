@@ -1,12 +1,7 @@
-"""T-ReX Critic LLM (§22.3) — C2_REFINED prompt, flag-only audit.
+"""Optional advisory LLM Critic.
 
-Calls vLLM with the C2_REFINED system prompt + Planner output + Evidence
-summary; returns a list of critic flags. The flags are recorded in
-`LLMCallRecord.critic_flags` and never override Selector decisions —
-they exist only for audit and downstream analysis.
-
-Verified by smoke 8748093 (F1=1.0 on 8 scenarios) + smoke 8764027
-(F1=1.000±0.000 across 5 seeds × 8 scenarios = paper-grade robust).
+Reviews Planner output and campaign evidence. Flags are archived for later inspection
+and do not override selection decisions.
 """
 
 from __future__ import annotations
@@ -24,7 +19,6 @@ from .provenance import model_digest_from_env
 from .schemas import EvidenceSummary, LLMCallRecord, to_jsonable
 
 
-# C2_REFINED prompt — verbatim from smoke 8748093 (paper-grade).
 CRITIC_SYSTEM = (
     "You are a critic reviewing a Planner's recommendation. Flag ONLY if "
     "you can identify SPECIFIC, EVIDENCE-CITED issues. Do not invent target "
@@ -55,11 +49,6 @@ class CriticCallConfig:
     temperature: float = 0.3
     enable_thinking: bool = False
     timeout_s: float = 30.0
-    # E-feedback fix (2026-05-26): default disabled (was True). Stand-alone
-    # tests / one-shot CLI runs previously triggered a real LLM client by
-    # default, which broke offline test env (openai import). Production
-    # controllers pass `enabled=bool(args.enable_critic)` explicitly so
-    # this default only affects ad-hoc instantiation.
     enabled: bool = False
 
 
@@ -77,16 +66,7 @@ def build_critic_payload(
     evidence: EvidenceSummary,
     planner_output: Any,  # PlannerOutput; avoid circular import
 ) -> dict:
-    """Compact review payload the Supervisor/critic sees.
-
-    v7_3: diagnostics are surfaced with the SAME pass/near/fail granularity as the
-    strict axis_stats, PLUS the two-tier `below_accept`/`quality_threshold`, the
-    alt-model advisory medians, and the per-design `diagnostic_blocking_axis` of
-    the exemplars — so the Supervisor can see every intermediate metric the Planner
-    saw (previously it got only {pass, median} for diagnostics and nothing on the
-    alt-model block or per-design diagnostic blockers). Strict success/SU are
-    untouched; this only widens what the critic can review.
-    """
+    """Build the compact evidence view used by the advisory Critic."""
     alt = getattr(evidence, "diagnostic_alt_model_scores", None) or {}
     return {
         "target_id": evidence.target_id,
@@ -157,8 +137,8 @@ def call_critic(
 
     user_text = build_critic_user_prompt(evidence, planner_output)
 
-    # Bug A fix (2026-05-30): thread the per-call timeout (see planner.py) so a
-    # hung vLLM critic request cannot block the synchronous controller reap loop.
+    # Bound the call so an unresponsive model cannot indefinitely block worker
+    # supervision.
     client = create_client(cfg.model, base_url=cfg.base_url,
                            enable_thinking=cfg.enable_thinking,
                            timeout=cfg.timeout_s, max_retries=1)
@@ -186,18 +166,8 @@ def call_critic(
 
 
 def _parse_flags(text: str) -> list[str]:
-    """Parse 'no_flags' or '(a) ...; (b) ...' into a list of flag strings.
-
-    §22.8.5: strict-marker policy. Plan §22.3 promised critic flags are
-    advisory; the older fallback (`flags = [text[:400]]` when no
-    `(a)..(d)` markers were found) turned any Critic prose — including
-    hallucinated "Looking at the evidence..." preambles — into a flag
-    that the next-tick Planner prompt was instructed to address. That
-    silently converted the audit-only critic into a soft veto on
-    Planner exploration.
-
-    Now: require `(a)`..`(d)` markers strictly. On parse failure, log
-    the raw response and return `[]` (treat as `no_flags`).
+    """Parse explicit (a) through (d) flag markers. Log unrecognized responses and return
+    no flags.
     """
     if not text:
         return []

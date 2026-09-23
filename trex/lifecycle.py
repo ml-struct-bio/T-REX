@@ -1,7 +1,4 @@
-"""HypothesisCard lifecycle arithmetic.
-
-Pure functions. See plan §8.
-"""
+"""Pure functions for HypothesisCard support, contradiction, and expiration."""
 
 from __future__ import annotations
 
@@ -24,10 +21,7 @@ class LifecycleConfig:
     contradiction_rdr_max: float = 0.05
     eps_deficit: float = 0.01
     default_min_abs_delta: float = 1.0
-    # support_points += panel_ready_bonus × N(supporting panel-ready descendants).
-    # Calibrated to 1.0 (was 2.0) by lifecycle simulation 2026-05-26 (plan §21 Q29):
-    # W=1 vs W=2 yield indistinguishable true_support (94.8% vs 92.0%) and
-    # false_support (8.7% vs 9.5%) at TTL=10 — the ×2 multiplier was unjustified.
+    # Additional support per supporting panel-ready descendant.
     panel_ready_bonus: float = 1.0
 
 
@@ -65,10 +59,8 @@ def supports_descendant(
     """Return (supports, reason). reason is empty when supports=True."""
     axis = predicted.axis
     if axis == "diversity":
-        # Legacy archive guard only. Production Planner validation now rejects
-        # diversity as a PredictedChange axis because diversity is panel/route
-        # evidence, not a per-result lifecycle metric. Keep old cards from
-        # silently supporting while making the non-production status explicit.
+        # Diversity is route/panel evidence, not a per-result lifecycle measurement.
+        # Reject this axis in legacy cards as well as in Planner validation.
         return False, "legacy_diversity_axis_not_supported"
     if axis not in axis_thresholds:
         return False, f"missing_threshold:{axis}"

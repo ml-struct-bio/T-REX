@@ -1,8 +1,5 @@
-"""Q3: CandidateBuilder annotates candidates whose (operator, config_delta)
-signature matches a recent joint_fail recipe.
-
-The annotation is scoped feedback, not a hard ban: stochastic search can need
-more samples before concluding an exact setup is unproductive.
+"""Tests for failed-route annotations, which provide scoped feedback without banning
+stochastic retries.
 """
 
 from __future__ import annotations
@@ -86,10 +83,7 @@ def _strict_recipe(operator_id: str, config: dict) -> Recipe:
 
 
 def test_stochastic_config_not_dropped_when_also_strict_success():
-    """The evidence reducer splits one config's descendants by outcome into
-    same-(operator,config) recipes. A config with BOTH joint_fail AND
-    strict_success entries is stochastically productive and must NOT be
-    deduped (production bug: 77/163 joint_fail drops were such configs)."""
+    """Keep a configuration that produced both failed and qualified designs eligible."""
     cfg = {"beam_width": 4, "n_branch": 4}
     e = _evidence_with_failed_recipe([
         _joint_fail_recipe("complexa_beam_default", cfg),
@@ -114,8 +108,7 @@ def test_candidate_kept_feasible_with_scoped_caution_when_matches_recent_joint_f
         _joint_fail_recipe("complexa_beam_default", {"beam_width": 4, "n_branch": 4}),
     ])
     h = _hyp({"complexa_beam": {"beam_width": 4, "n_branch": 4}})
-    # include_warmstart=False isolates the dedup path (the stalled fixture would
-    # otherwise also inject the review-#8 deterministic fallback — tested separately).
+    # Disable warmstart to isolate failed-route feedback.
     cands = build_candidates([h], e, include_warmstart=False)
     assert len(cands) == 1
     assert cands[0].feasibility.all_ok()
@@ -151,11 +144,9 @@ def test_empty_config_matches_empty_failed_signature():
     e = _evidence_with_failed_recipe([
         _joint_fail_recipe("complexa_beam_default", {}),
     ])
-    # axis="pLDDT" so the rec-3 soft-default does NOT fire (a structural pLDDT
-    # block has no fixed-backbone tweak) — keeps config_delta genuinely empty so
-    # this empty-signature dedup path is what's exercised.
-    h = _hyp(None, axis="pLDDT")  # no suggestions -> empty config_delta
-    # include_warmstart=False isolates the dedup path (see review #8 fallback test).
+    # No default setting is available for a pLDDT-only hypothesis, leaving the
+    # configuration empty. Disable warmstart to isolate empty-configuration deduplication.
+    h = _hyp(None, axis="pLDDT")  # Disable warmstart to isolate feedback for an empty configuration.
     cands = build_candidates([h], e, include_warmstart=False)
     assert len(cands) == 1
     assert cands[0].feasibility.all_ok()
@@ -166,10 +157,9 @@ def test_empty_config_matches_empty_failed_signature():
 
 
 def test_stalled_complexa_only_hypotheses_inject_escape_floor():
-    """review #8 (2026-05-31): a STALLED tick where the LLM emitted hypotheses
-    but no cross-paradigm escape should not spend the whole tick on one exact
-    Complexa retry. The deterministic escape floor is added while the original
-    Complexa candidate remains feasible and auditable."""
+    """A stalled campaign can retain the proposed retry while adding deterministic
+    alternatives.
+    """
     e = _evidence_with_failed_recipe([
         _joint_fail_recipe("complexa_beam_default", {"beam_width": 4, "n_branch": 4}),
     ])

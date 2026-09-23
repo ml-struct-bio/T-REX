@@ -1,4 +1,4 @@
-"""Smoke tests for state classifier (S2 surrogate)."""
+"""Test campaign-state classification on synthetic evidence."""
 
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ def test_stalled_when_zero_su_and_low_near_miss():
 
 def test_stalled_when_zero_su_and_diffuse_near_misses():
     """A dry, near-miss-rich window that is not axis-concentrated is still a
-    plateau, not low_evidence. SC2RBD's T-ReX final window hit this case:
+    plateau, not low_evidence. SC2RBD's T-REX final window hit this case:
     dSU=0, near_miss>=3, diffuse blockers, large cumulative compute."""
     label = classify_state(
         worker_gpu_h_last_3_ticks=1.5,
@@ -142,8 +142,7 @@ def test_stalled_when_top_bin_share_high():
         top_bin_share=0.85,
         cfg=StateClassifierConfig(),
     )
-    # Note: productive check fails because su_rate=0.1 vs threshold 0.04, productive wins.
-    # Need duplicate_fraction high to skip productive.
+    # Productive classification takes precedence when its conditions are met.
     assert label in ("productive", "stalled")
 
 
@@ -182,12 +181,9 @@ def test_low_evidence_gate_uses_cumulative_not_window():
 
 
 def test_not_stuck_low_evidence_when_window_small_but_cumulative_high():
-    """Regression (2026-05-28): Complexa emits many cheap-per-record results so
-    the 60-record window gpu_h plateaus ~0.8 and can NEVER reach the old 2.0
-    window gate — the state was pinned at low_evidence for the whole run
-    (observed 27/27 live ticks; an old run 548/548). The cold-start gate now
-    uses cumulative GPU-h, so a run that has genuinely spent >1 GPU-h advances
-    and the productive/stalled/rescue machine engages."""
+    """Cumulative compute permits cold-start exit even when recent records are individually
+    inexpensive.
+    """
     # No new SU + low near-miss + tiny window + high cumulative → stalled
     stalled = classify_state(
         worker_gpu_h_last_3_ticks=0.8,

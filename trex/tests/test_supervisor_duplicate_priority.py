@@ -1,11 +1,4 @@
-"""Q12: Supervisor duplicate-candidate-across-modes prompt + retry.
-
-Tests:
-  1. SUPERVISOR_SYSTEM prompt explicitly forbids duplicate-mode.
-  2. _validate_schema rejects with the expected fail_reason.
-  3. call_supervisor performs scoped one-shot retry when first call
-     returns duplicate_candidate_across_modes and second call is clean.
-"""
+"""Test rejection and one-shot retry of Supervisor candidates assigned to multiple modes."""
 
 from __future__ import annotations
 

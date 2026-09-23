@@ -10,6 +10,7 @@ import hashlib
 from collections import Counter
 from functools import lru_cache
 from pathlib import Path
+from sys import intern
 from typing import Any
 
 
@@ -26,7 +27,7 @@ def _chain_residues(path: Path) -> dict[str, tuple[str, ...]]:
     return _read_chain_residues(str(path.resolve()), stat.st_size, stat.st_mtime_ns)
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=16384)
 def _read_chain_residues(path_text: str, size: int, mtime_ns: int) -> dict[str, tuple[str, ...]]:
     # Identity is queried by structural/sequence clustering and both caches.
     # Stat-keyed reuse avoids rereading unchanged structures on each query.
@@ -45,7 +46,7 @@ def _read_chain_residues(path_text: str, size: int, mtime_ns: int) -> dict[str, 
         chain = line[21].strip()
         key = (chain, line[22:27])
         if chain and key not in seen:
-            chains.setdefault(chain, []).append(line[17:20].strip().upper())
+            chains.setdefault(chain, []).append(intern(line[17:20].strip().upper()))
             seen.add(key)
     if not chains:
         raise ChainIdentityError(f"No protein CA chains in {path}")

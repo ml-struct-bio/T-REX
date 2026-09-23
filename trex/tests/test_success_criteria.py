@@ -1,11 +1,4 @@
-"""Unit tests for the SSOT `success_criteria` module (Plan §2.5).
-
-Every consumer of strict_success / near_miss / joint_fail / NEAR_PASS_MARGINS
-imports from this file; a silent change here would propagate to lifecycle
-TTL retire decisions, EvidenceSummary axis_stats, recipe classifications,
-state classifier triggers, and the §18.1 acceptance gates. Hence the
-boundary-condition coverage here is load-bearing.
-"""
+"""Boundary tests for shared qualification, near-miss, and failure criteria."""
 
 from __future__ import annotations
 
@@ -21,11 +14,6 @@ from trex.success_criteria import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Threshold invariants (Plan §2.5 SSOT)
-# ---------------------------------------------------------------------------
-
-
 def test_strict_thresholds_match_plan_2_5():
     """Official Complexa: pLDDT >= 90, iPAE <= 7/31, scRMSD < 1.5 Å (strict)."""
     assert STRICT_SUCCESS["pLDDT"] == (90.0, "increase")
@@ -35,7 +23,7 @@ def test_strict_thresholds_match_plan_2_5():
 
 
 def test_near_pass_margins_match_plan_2_5():
-    """Plan §2.5: pLDDT 5.0, iPAE 0.05, scRMSD 0.3 Å."""
+    """Verify the declared near-pass margins."""
     assert NEAR_PASS_MARGINS == {
         "pLDDT": 5.0,
         "iPAE": 0.05,

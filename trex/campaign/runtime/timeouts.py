@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 
-# Historical expected-runtime references retained for compatibility and audit.
+# Runtime reference values; enforced ceilings and watchdog settings are below.
 FAMILY_TIMEOUT_S: dict[str, int] = {
     "bindcraft": 9000,
     "complexa_beam": 1800,

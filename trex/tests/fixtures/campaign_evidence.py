@@ -117,8 +117,6 @@ def case_stalled(model: str) -> tuple[str, EvidenceSummary]:
             "bindcraft": {"pLDDT": False, "iPAE": False, "binder_scRMSD": False},
         },
     )
-    # MCR removed plan §10.6 — surface the recent-fallback signal only
-    # (renamed from `mcr_trigger_high_fallback`).
     from dataclasses import replace as _replace
     e = _replace(
         e,

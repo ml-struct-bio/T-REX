@@ -31,9 +31,18 @@ def add_campaign_parser(subparsers: argparse._SubParsersAction) -> None:
     init = commands.add_parser("init", help="write an explicit campaign YAML template")
     init.add_argument("config", type=Path)
     init.add_argument("--target", required=True)
-    init.add_argument("--archive-root", required=True)
+    init.add_argument("--archive-root", "--output", dest="archive_root", required=True)
     init.add_argument("--name")
-    init.add_argument("--asset-root")
+    init.add_argument(
+        "--asset-root",
+        help="T-REX-assets bundle root or its targets/ directory",
+    )
+    init.add_argument(
+        "--gpus", type=int, default=4, help="total GPUs, including one for the LLM"
+    )
+    init.add_argument(
+        "--hours", type=float, default=48.0, help="campaign duration in hours"
+    )
     init.add_argument("--target-constraint")
     init.add_argument("--target-pdb")
     init.add_argument("--force", action="store_true")
@@ -100,6 +109,8 @@ def _init(args: argparse.Namespace) -> int:
         asset_root=args.asset_root,
         target_constraint=args.target_constraint,
         target_pdb=args.target_pdb,
+        max_wall_hours=args.hours,
+        total_gpus=args.gpus,
         force=args.force,
     )
     print(path)
@@ -179,8 +190,8 @@ def _run(args: argparse.Namespace) -> int:
             print(f"  source SHA  {provenance.source_tree_sha256}")
             print(f"  model SHA   {provenance.model_content_sha256}")
 
-            # Keep the environment for extension/legacy compatibility, while
-            # the built-in controller receives the reviewed typed path snapshot.
+            # Expose paths to extensions through the environment; the built-in
+            # controller receives the resolved typed path snapshot.
             # The critic records the verified model digest on every LLM call.
             with applied_environment(
                 {"TREX_MODEL_DIGEST": provenance.model_content_sha256}

@@ -1,154 +1,145 @@
-# Running on Slurm
+# Run a campaign
 
-Run all shell commands from the repository root.
+Complete [installation](installation.md) and [asset setup](assets.md), then run
+commands from the T-REX checkout. The public interface keeps campaign choices in
+one YAML and installation paths in `.env`.
 
+## Create the campaign YAML
 
-This is an alternative launch path for the supplied HPC template. It starts
-vLLM on GPU 0 and worker processes on the remaining GPUs using explicit
-`TREX_*` environment variables. The `.env` file is not required by the YAML
-path above, and it is never loaded automatically. Do not point the YAML and
-Slurm launchers at the same new archive simultaneously.
+Create the installation profile once and verify its backend executable paths:
 
 ```bash
 cp .env.example .env
-# Edit every /path/to/... value.
-set -a
-source .env
-set +a
-mkdir -p slurm_logs
 ```
 
-For a registered target, fail-closed preflight checks the target ID, configured
-chains, hotspot residues, PDB SHA256, enabled backends, checkpoint manifests,
-declared checkpoint files, executables, the model manifest, and optionally
-pinned backend revisions:
+Create a campaign by specifying the target, total GPUs, controller duration and
+output directory:
 
 ```bash
-trex-validate \
+trex init campaign.yaml \
   --target cd45 \
-  --asset-root "$TREX_TARGET_ASSET_ROOT" \
-  --enabled-families "$TREX_ENABLED_FAMILIES" \
-  --require-backends \
-  --require-model \
-  --verify-backend-revisions
+  --gpus 4 \
+  --hours 48 \
+  --output /absolute/path/to/outputs
 ```
 
-For a publication release audit, add `--verify-checkpoint-content`. This rereads
-every declared Qwen, AF2, and ProteinMPNN file and compares its SHA256; normal
-startup uses the manifest plus file names and byte sizes to avoid repeatedly
-streaming large weight trees from shared storage.
+GPU 0 is reserved for the local Qwen server. The other GPUs are campaign
+workers. Thus, `--gpus 2`, `4` and `8` create one, three and seven workers. The
+launcher currently requests all GPUs on one node.
 
-Only enabled families are required. For example, disabling `boltzgen` removes
-the BoltzGen executable requirement; Foldseek remains required because it
-defines the primary endpoint.
+The generated YAML also exposes enabled design families, seed, controller policy
+and optional backend overrides. Most users can leave backend paths `null`; the
+CLI loads installed locations from `.env` and `.env.assets`. YAML paths are
+resolved relative to the YAML file.
 
-### Submit the Slurm job
+Registered targets obtain their target constraint and PDB from the repository
+and asset bundle. A custom target needs an explicit constraint JSON and PDB; see
+the [custom-target guide](../examples/custom_target/README.md).
 
-The reference layout uses four H100s: GPU 0 serves the local LLM and GPUs 1–3
-are workers. All public entry points default to a **48-hour cumulative
-controller limit**. With three workers, the nominal reporting budget is
-**144 worker GPU-hours**.
+## Validate and submit
 
-The Slurm template reserves **49 hours**, providing one hour of headroom for
-startup and shutdown around the controller window. This scheduler reservation
-is distinct from the 144-worker-GPU-hour reporting denominator; actual
-resource usage is retained separately. If startup and shutdown exceed the
-headroom, the scheduler can still interrupt the run. YAML and shell launches
-require the user to arrange sufficient scheduler time.
-
-The controller checks the cutoff at the start of each loop and then
-drains busy workers sequentially, waiting up to 10 minutes per slot before
-salvaging results and terminating an unfinished process. This is not a hard
-per-start deadline or a shared one-hour drain. The controller uses that
-behavior. See the [timing contract](reproducibility.md#execution-timing-and-shutdown).
-
-The controller itself scales to any unique comma-separated worker GPU list. To
-run more than the four-GPU reference layout, request the larger allocation from
-Slurm and disable the publication-template worker-count guard, for example:
+Check the complete resolved input without submitting a job:
 
 ```bash
-(
-  export TREX_WORKER_GPUS=1,2,3,4,5,6,7
-  export TREX_REQUIRE_THREE_WORKERS=0
-  export TREX_CHARGED_GPUS=8
-  sbatch --gres=gpu:8 --export=ALL slurm/trex_per_target_node.slurm
-)
+trex check campaign.yaml
 ```
 
-Export comma-separated values in the shell as shown above. Do not embed
-`TREX_WORKER_GPUS` or `TREX_ENABLED_FAMILIES` inside `sbatch --export=...`:
-Slurm treats their commas as separators and can silently truncate the value.
+This verifies target identity and hashes, required checkpoint manifests, enabled
+backends, the local Qwen snapshot and pinned backend revisions. Add
+`--verify-checkpoint-content` for a slow full rehash of every declared model
+file.
 
-Validate the larger worker-GPU mapping first without loading the LLM or
-scientific backends:
+Submit using your cluster's default account and partition:
 
 ```bash
-(
-  export TREX_WORKER_GPUS=1,2,3,4,5,6,7
-  export TREX_TEST_PYTHON=/path/to/trex-dev/bin/python
-  sbatch --gres=gpu:8 --export=ALL slurm/multigpu_smoke.slurm
-)
+trex submit campaign.yaml
 ```
 
-For a bounded backend smoke, see
-[installation checks](installation.md#optional-smoke-checks). Temporary settings belong in a
-subshell so they do not change the subsequent production submission.
-
-Submit the reference campaign after the checks above:
+If your site requires scheduler identifiers, pass them explicitly:
 
 ```bash
-(
-  export TARGET=cd45
-  export TREX_MAX_WALL_H=48.0
-  sbatch --export=ALL slurm/trex_per_target_node.slurm
-)
+trex submit campaign.yaml \
+  --account YOUR_ACCOUNT \
+  --partition YOUR_GPU_PARTITION
 ```
 
-Site-specific account, partition, reservation, and QOS options should be passed
-to `sbatch`; they are deliberately not hard-coded. The script:
+`--account` identifies the project charged for compute. `--partition` selects a
+queue or node group. Valid names and defaults are site-specific. `--qos` and
+repeatable `--sbatch-option` are available when required by the site.
 
-1. validates the full execution contract;
-2. verifies the model manifest;
-3. writes `run_provenance.json`;
-4. starts and health-checks vLLM on GPU 0; and
-5. starts the worker controller over `TREX_WORKER_GPUS`.
+`trex submit` validates the configuration, derives worker indices and the
+Slurm GPU/time request, and invokes `slurm/T-REX.slurm`. Do not run the Slurm
+file separately. The job starts and health-checks the pinned local LLM on GPU 0,
+writes provenance, and starts the controller on the remaining GPUs.
 
-For a new run, the archive is created under
-`$TREX_ARCHIVE_BASE/trex_<target>_s<seed>_<YYYYMMDD_HHMM>/<slurm-job-id>/`.
-Use that directory with the status and analysis commands below.
+The scheduler request includes startup/shutdown headroom beyond the campaign
+hours. Four GPUs and `--hours 48` request 49 hours. CPU and memory defaults are
+16 cores and 192 GB; pass site-specific changes with `--sbatch-option`, for
+example `--sbatch-option=--mem=256G`. GPU count and time must stay in the YAML.
 
-To resume the same append-only campaign:
+## Monitor and inspect outputs
+
+A submitted run prints an archive path of this form:
+
+```text
+<output>/trex_<target>_s<seed>_<YYYYMMDD_HHMM>/<slurm-job-id>/
+```
+
+Slurm stdout and stderr are in `slurm_logs/`. LLM logs are `vllm.out` and
+`vllm.err` inside the run archive.
 
 ```bash
-(
-  export TREX_RESUME_ARCHIVE=/absolute/path/to/existing/archive
-  export TREX_MAX_WALL_H=48.0
-  sbatch --export=ALL slurm/trex_per_target_node.slurm
-)
+squeue -u "$USER"
+TREX_RUN_ARCHIVE=/absolute/path/to/run/archive
+trex status "$TREX_RUN_ARCHIVE"
+trex export "$TREX_RUN_ARCHIVE" --n 100
 ```
 
-Resume preserves the archive and writes a separate
-`run_provenance_resume_<job-id>.json`. `TREX_MAX_WALL_H` is the total
-controller limit: the controller recovers the elapsed offset from the
-archive, so 48.0 does not add another 48 hours to a resumed campaign. Preserve
-the original run's configured limit when resuming; do not replace an explicit
-custom limit with the new-run default.
+Start result review with `export/manifest.csv`; selected structures are under
+`export/pdbs/`. See [outputs and analysis](outputs-and-analysis.md) for record
+schemas, joins and structural-diversity analysis.
 
-## Local or externally hosted LLM endpoint
+For a short molecular smoke, use `--hours 0.75` or longer. The shortest
+default generator estimate is 0.5 hours, and admission also reserves a 0.1-hour
+drain margin; smaller values may validate startup without launching a backend
+job. Check `dispatch_records.jsonl` to confirm molecular work started.
 
-`scripts/run_controller.sh` accepts an existing OpenAI-compatible endpoint.
-For a benchmark-reproducible run, also provide the local model path and
-manifest so provenance can identify and validate its files:
+## Resume an interrupted campaign
+
+Keep the original YAML and submit the exact existing archive:
 
 ```bash
-export TARGET=cd45
-export TREX_TARGET_PDB=/absolute/path/to/CD45.pdb
-export TREX_ARCHIVE_ROOT=/absolute/path/to/run
-export TREX_LLM_BASE_URL=http://127.0.0.1:8000/v1
-export TREX_QWEN_MODEL_PATH=/absolute/path/to/Qwen3.6-27B-FP8
-./scripts/run_controller.sh
+trex submit campaign.yaml --resume /absolute/path/to/existing/archive
 ```
 
-For development against a remote model whose files cannot be inspected, set
-`TREX_ALLOW_UNVERIFIED_LLM=1`. The launcher prints a warning and the resulting
-campaign is **not** benchmark-reproducible.
+Resume appends records and includes elapsed time already present in the archive;
+it does not add another full campaign duration. Never run two controllers
+against the same archive.
+
+## Run inside an existing allocation
+
+When you manage the GPU allocation and compatible OpenAI-style LLM server
+separately, set `llm.base_url` in the YAML and run:
+
+```bash
+trex design campaign.yaml
+```
+
+This command preflights and starts the controller in the current allocation. It
+does not call Slurm or start vLLM. Use `trex design campaign.yaml --dry-run` for
+a read-only resolution check.
+
+## Compatibility interface
+
+Existing configurations can continue to use `.env` campaign variables and the
+shell wrapper:
+
+```bash
+bash scripts/submit.sh --check
+bash scripts/submit.sh --account=YOUR_ACCOUNT --partition=YOUR_GPU_PARTITION
+```
+
+The wrapper and `slurm/T-REX.slurm` remain the implementation underneath
+`trex submit`; new configurations should use the YAML CLI above. The detailed
+`trex campaign init/show/preflight/run/status` namespace is retained for scripts
+that already use it.

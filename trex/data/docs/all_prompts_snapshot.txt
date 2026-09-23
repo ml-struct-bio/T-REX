@@ -1,4 +1,4 @@
-T-ReX available LLM prompt catalog
+T-REX available LLM prompt catalog
 Schema: trex.prompt-catalog.v2
 Catalog membership is not a record of model invocations.
 Cross-campaign memory: null
@@ -8,13 +8,13 @@ PLANNER
 ========================================================================================
 Usage scope: campaign_llm
 Runtime source: trex/planner.py
-Runtime source SHA256: 8f866d58bf300f0ffd8cd0deadbec88bbde55fece0a1fb557dca23dbfee11aa3
-System prompt SHA256: bb1052eacb83ac4b920d854ad96b4b67eb9660334f4df8e54c5c93b4311844bc
+Runtime source SHA256: dd3d84f27d496a22e4bbb6582d39d8b003bdf4c27f466aca663d73744a54350e
+System prompt SHA256: f904090f9bb6775175a64f030759d9f5e7f367f5179b0e4656974431e363b4ef
 Module defaults: {"base_url": "http://127.0.0.1:8500/v1", "confidence_threshold": 0.55, "enable_thinking": false, "max_tokens": 3072, "model": "vllm/Qwen/Qwen3.6-27B-FP8", "prompt_variant": "default", "temperature": 0.2, "timeout_s": 90.0}
 Prompt flow: system instructions -> current evidence summary -> active hypotheses -> available methods and allowed settings -> per-method workload limits -> optional bootstrap methods, critic flags, and cross-campaign memory
 
 [SYSTEM PROMPT]
-You are the Planner for T-ReX, a budgeted protein-binder design controller.
+You are the Planner for T-REX, a budgeted protein-binder design controller.
 
 Task: from the latest EvidenceSummary, propose 1-4 testable HypothesisCards that
 increase structurally-unique strict successes per live WORKER-WALL GPU-hour. Do not use
@@ -171,8 +171,8 @@ Special safeguards:
 
 
 FAMILY ROLE APPENDIX (generated from capability_registry; per-tick family_role_table is authoritative for availability):
-- bindcraft: role=generator; cost=diagnostic; de_novo_or_target_conditioned; diagnostic_only; scoring=diagnostic-only output; chain through canonical structure_refilter for official strict/SU; notes=external generator — first use is diagnostic, never extended (plan §12.4)
-- boltzgen: role=generator; cost=diagnostic; de_novo_or_target_conditioned; diagnostic_only; scoring=diagnostic-only output; chain through canonical structure_refilter for official strict/SU; notes=external generator — first use is diagnostic, never extended (plan §12.4)
+- bindcraft: role=generator; cost=diagnostic; de_novo_or_target_conditioned; diagnostic_only; scoring=diagnostic-only output; chain through canonical structure_refilter for official strict/SU; notes=external generator — first use is diagnostic, never extended
+- boltzgen: role=generator; cost=diagnostic; de_novo_or_target_conditioned; diagnostic_only; scoring=diagnostic-only output; chain through canonical structure_refilter for official strict/SU; notes=external generator — first use is diagnostic, never extended
 - complexa_beam: role=generator; cost=standard; de_novo_or_target_conditioned; strict_capable; scoring=direct official strict/SU when canonical af2folding metrics are present; fallback chain only if missing
 - complexa_best_of_n: role=generator; cost=standard; de_novo_or_target_conditioned; strict_capable; scoring=direct official strict/SU when canonical af2folding metrics are present; fallback chain only if missing; notes=best-of-n: replicas independent samples, take the best.
 - complexa_fk_steering: role=generator; cost=standard; de_novo_or_target_conditioned; strict_capable; scoring=direct official strict/SU when canonical af2folding metrics are present; fallback chain only if missing; notes=fk-steering: log-derivative reward steering at low temp.
@@ -247,21 +247,7 @@ def build_user_prompt(
     available_families: list[str] | None = None,
     recent_critic_flags: list[str] | None = None,
 ) -> str:
-    # B-010 fix (2026-05-26): inject the actual allowed_params schema. The
-    # system prompt references `allowed_params_per_family` as if it would be
-    # present in the user payload, but no caller injected it — the LLM was
-    # left guessing param names and consistently hallucinated keys like
-    # `num_outputs`, `steering_weight`, `c_puct` that aren't in any family's
-    # allowed_params. Without this, every config_delta got partial- or fully
-    # dropped at the validator and Complexa ran with default config.
-    #
-    # NEW-1 fix (2026-05-26): filter the schema by current-cluster
-    # availability. The earlier version exposed all registered families to
-    # the LLM regardless of UNAVAILABLE_THIS_CLUSTER, so the planner spent
-    # most of its tick-1 hypothesis budget on families (proteinmpnn_redesign,
-    # boltzgen) that were always rejected at feasibility. `available_families`
-    # is computed by the caller (live_tick) by combining registry's
-    # `feasible_families()` with `cfg.builder.unavailable_backends_override`.
+    # Supply allowed settings only for currently available families.
     from .capability_registry import (
         default_registry,
         family_eval_budget_schema_for_prompt,
@@ -273,13 +259,8 @@ def build_user_prompt(
     budget_schema = family_eval_budget_schema_for_prompt(
         default_registry(), families=available_families
     )
-    # fix20 #4b (2026-05-26): render the family role metadata from the
-    # registry so the per-tick prompt always reflects current `role`,
-    # `requires_parent_pdb`, and `outputs_diagnostic_only` flags. The
-    # static role narrative in the system prompt explains *how* to use
-    # each role; this dynamic block tells the LLM *which family is which*
-    # without anyone having to keep the system prompt in sync with the
-    # registry.
+    # Render family roles from the registry so prompt metadata matches feasibility
+    # checks.
     reg_now = default_registry()
     family_role_table: dict[str, dict[str, object]] = {}
     for fam in sorted(available_families):
@@ -346,18 +327,9 @@ def build_user_prompt(
             "transparent scheduling prior, not as evidence that any family should "
             "win this target."
         )
-    # D-feedback (2026-05-26): if the Critic raised flags about the previous
-    # tick's hypotheses, surface them so the LLM can either correct course or
-    # justify continuing. Flags are advisory — they don't block the next
-    # proposal, but ignoring them yields lower self-confidence in our audit.
+    # Expose previous advisory flags for consideration without blocking proposals.
     if recent_critic_flags:
         payload["recent_critic_flags_last_tick"] = list(recent_critic_flags)
-        # §22.8.5 tone-down (2026-05-26 PM): plan §22.3 promised the Critic
-        # is informational audit only. Earlier wording ("Either address each
-        # flag in this tick's claims OR provide a justification") made the
-        # Planner spend slot-budget defending instead of exploring, turning
-        # the Critic into a de-facto soft veto. Reworded to "consider" so
-        # the LLM can weigh the flags against evidence on equal footing.
         payload["instructions"] = payload["instructions"] + (
             " The Critic LLM raised the listed flags about your previous "
             "hypotheses. These are advisory observations, not directives. "
@@ -366,8 +338,6 @@ def build_user_prompt(
             "the evidence has shifted or the flag was speculative, your new "
             "hypotheses may diverge from it without justification."
         )
-    # v7_3: prepend a one-line TL;DR so the decision 5-tuple is the FIRST thing
-    # the LLM reads, not buried 75% deep in the sorted JSON (form audit).
     head = evidence_tldr(evidence)
     _hyp_line = _hypothesis_outcomes_tldr(active_hypotheses)
     if _hyp_line:
@@ -379,13 +349,13 @@ SUPERVISOR
 ========================================================================================
 Usage scope: campaign_llm
 Runtime source: trex/supervisor.py
-Runtime source SHA256: a44c17af46bdbfa2f6783b60e9aaeb5cbb43e65f2594968529f462de65c7eb25
-System prompt SHA256: b50305be21fcf325b490c22165004c8b427e3d9008797e84bbef74f971ca854d
+Runtime source SHA256: 78cbbd6e6a4e42e08d5e2da983b75e9d730412a09b212782d138b9f882c8d794
+System prompt SHA256: 95de79e4730f2f2572ea28ad6aa6e44178de6fef5e5c6240b4f6d2d5fb4989eb
 Module defaults: {"base_url": "http://127.0.0.1:8500/v1", "confidence_threshold": 0.55, "enable_thinking": false, "max_tokens": 3072, "model": "vllm/Qwen/Qwen3.6-27B-FP8", "temperature": 0.0, "timeout_s": 90.0}
 Prompt flow: system instructions -> the same current evidence summary -> active HypothesisCards -> validated ActionCandidates -> current queue and recent-start context -> optional cross-campaign memory -> conditional one-shot ranking repair after a schema error
 
 [SYSTEM PROMPT]
-You are the Supervisor for T-ReX, a budgeted protein-binder design controller.
+You are the Supervisor for T-REX, a budgeted protein-binder design controller.
 
 Given decomposed evidence, active hypotheses, and validated ActionCandidates,
 choose a mode_mixture and rank launchable candidates.
@@ -515,12 +485,7 @@ def build_user_prompt(
     selector_context: dict[str, Any] | None = None,
 ) -> str:
     from .fallback import describe_clamp_for_prompt
-    # Supervisor stub-leak fix (2026-05-30): use the SAME curated view as the
-    # Planner (build_evidence_for_prompt) so the Supervisor — the LLM that emits
-    # mode_mixture/resource_class — does NOT receive the route_health/llm_health
-    # stubs (constant "route wide open / LLM perfectly healthy" dicts) that would
-    # anchor it toward over-allocating capacity. This also keeps both LLMs'
-    # evidence views identical, preventing future divergence.
+    # Use the same reduced evidence view as the Planner.
     from .planner import build_evidence_for_prompt
     mixture_ranges = describe_clamp_for_prompt(evidence.state_label)
     payload = {
@@ -576,9 +541,6 @@ def build_user_prompt(
             "parent availability, evaluation requirements, deterministic safeguards, "
             "or current-target evidence."
         )
-    # v7_3: prepend the TL;DR digest and mixture guidance so the evidence
-    # summary and clamp context are the FIRST things read, instead of being
-    # buried after the full evidence dump.
     from .planner import evidence_tldr
     header = (
         evidence_tldr(evidence)
@@ -610,7 +572,7 @@ CRITIC
 ========================================================================================
 Usage scope: standalone_optional_llm
 Runtime source: trex/critic.py
-Runtime source SHA256: 401be93d51ee1da1516947e73d39338fe5db7e77374cc4798a9b6b1289eca9d9
+Runtime source SHA256: 597b78cb2950b0ef7b677f554126c8d897eb28192455188726ebf31bbea04cae
 System prompt SHA256: 25a22d747e7d82c916cd73a39e0be6bcd2782d02aca7214e8a803114841d62f0
 Module defaults: {"base_url": "http://127.0.0.1:8500/v1", "enable_thinking": false, "enabled": false, "max_tokens": 256, "model": "vllm/Qwen/Qwen3.6-27B-FP8", "temperature": 0.3, "timeout_s": 30.0}
 Prompt flow: system instructions -> current evidence summary -> Planner recommendation -> flag-only audit response
@@ -646,16 +608,7 @@ def build_critic_payload(
     evidence: EvidenceSummary,
     planner_output: Any,  # PlannerOutput; avoid circular import
 ) -> dict:
-    """Compact review payload the Supervisor/critic sees.
-
-    v7_3: diagnostics are surfaced with the SAME pass/near/fail granularity as the
-    strict axis_stats, PLUS the two-tier `below_accept`/`quality_threshold`, the
-    alt-model advisory medians, and the per-design `diagnostic_blocking_axis` of
-    the exemplars — so the Supervisor can see every intermediate metric the Planner
-    saw (previously it got only {pass, median} for diagnostics and nothing on the
-    alt-model block or per-design diagnostic blockers). Strict success/SU are
-    untouched; this only widens what the critic can review.
-    """
+    """Build the compact evidence view used by the advisory Critic."""
     alt = getattr(evidence, "diagnostic_alt_model_scores", None) or {}
     return {
         "target_id": evidence.target_id,

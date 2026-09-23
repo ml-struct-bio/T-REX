@@ -3,7 +3,7 @@
 Reads:
     <output_dir>/rewards_<config>_<seed>.csv
 
-Schema (verified against real CD45 fixture):
+CSV fields:
   Required columns:
     pdb_path                    — PDB output path on disk
     sample_type                 — "final" or "lookahead". Filter to "final".
@@ -21,7 +21,6 @@ Schema (verified against real CD45 fixture):
 
 Filter rules:
   - Only emit ResultRecord for rows with `sample_type == "final"`
-    (Plan §3 lifecycle: lookahead beam candidates are NOT final)
   - Rows with missing core metrics are emitted as diagnostic records; only
     rows with usable structure artifacts are marked for canonical scoring.
   - If `rewards_*.csv` missing → ParseError
@@ -37,19 +36,16 @@ ResultRecord mapping:
   result_id        := hash(target_id, candidate_id, launch namespace,
                            sample_index, pdb basename)
   parent_ids       := [ctx.candidate_id] (worker spawn point)
-  backend_family   := from ctx.method_family (complexa_beam, complexa_best_of_n, complexa_fk_steering, complexa_mcts)
+  backend_family   := from ctx.method_family (complexa_beam, complexa_best_of_n,
+  complexa_fk_steering, complexa_mcts)
   target_id        := ctx.target_id
   metrics["pLDDT"]                         := af2folding_plddt_log × 100
   metrics["iPAE"]                          := af2folding_i_pae
   metrics["binder_scRMSD"]                 := af2folding_rmsd
   metrics["complexa_native_*"]             := same values, kept as provenance
   + diagnostic: i_ptm, min_ipae, ipsae, contact density when present
-  gpu_h            := placeholder COMPLEXA_GPU_H_PER_FINAL (0.5). NOTE
-                      (G-027, 2026-05-29): this parser does NOT read the
-                      timing CSV; the authoritative per-record gpu_h is
-                      reassigned post-parse by the controller (§22.8.9) to
-                      (elapsed wall-clock GPU time / n_records), so this
-                      constant never reaches method_health / su_per_gpu_h.
+  gpu_h := parser placeholder; the controller assigns measured job compute after
+  parsing.
 """
 
 from __future__ import annotations
@@ -64,8 +60,7 @@ from ..schemas import ResultRecord
 from .types import ParseError, ParserContext
 
 
-# Per-row gpu_h fallback: each Complexa final sample takes ~30 min on H100
-# (calibrated from V5 SLURM elapsed time / N final samples).
+# Parser fallback cost; the controller replaces it with measured job compute.
 COMPLEXA_GPU_H_PER_FINAL = 0.5
 
 
@@ -123,7 +118,7 @@ def _resolve_structure_path(raw_path: str, output_dir: Path) -> str | None:
 def parse_complexa_output(
     output_dir: Path, ctx: ParserContext
 ) -> list[ResultRecord]:
-    """Convert a Complexa inference output directory into T-ReX ResultRecords."""
+    """Convert a Complexa inference output directory into T-REX ResultRecords."""
     if not output_dir.exists():
         raise ParseError(f"Complexa output dir missing: {output_dir}")
 
@@ -132,11 +127,8 @@ def parse_complexa_output(
         raise ParseError(f"Complexa output dir has no rewards_*.csv: {output_dir}")
 
     records: list[ResultRecord] = []
-    # B-009 fix (2026-05-26): prefer ctx.method_family (set by controller from
-    # the spawning ActionCandidate); fall back to candidate_id-encoded family
-    # then to "complexa_beam" if neither is present. Without this propagation,
-    # MCTS / fk-steering / best-of-n launches would all be tagged as plain beam
-    # in the archive.
+    # Prefer the spawning candidate family, then the candidate-ID family, then the
+    # parser default.
     if ctx.method_family:
         family = ctx.method_family
     elif ":" in ctx.candidate_id:

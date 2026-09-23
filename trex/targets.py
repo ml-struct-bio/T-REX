@@ -1,4 +1,4 @@
-"""Resolve, inspect, and scaffold T-ReX target inputs.
+"""Resolve, inspect, and scaffold T-REX target inputs.
 
 The target registry is the single source of truth for bundled target labels.
 Custom targets use the same resolver by supplying an explicit constraint JSON
@@ -127,7 +127,11 @@ def resolve_target(
         if target_pdb is not None:
             pdb = target_pdb
         elif asset_root is not None:
-            pdb = asset_root / entry["pdb"]
+            # Accept both the portable bundle root (T-REX-assets/) and the
+            # target-only root written to .env.assets (T-REX-assets/targets/).
+            direct = asset_root / entry["pdb"]
+            nested = asset_root / "targets" / entry["pdb"]
+            pdb = direct if direct.is_file() or not nested.is_file() else nested
         else:
             raise ValueError(
                 f"registered target {name!r} needs --asset-root or --target-pdb"

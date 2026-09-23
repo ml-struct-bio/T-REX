@@ -1,19 +1,5 @@
-"""Tool-integration correctness fixes (2026-05-29, Cluster G-018..G-027).
-
-Locks the fixes found by auditing T-ReX's wrappers/parsers against the ACTUAL
-external tool source (ProteinMPNN and Complexa):
-
-  G-019  MPNN parser skips the NATIVE (parent) FASTA record (header lacks
-         `sample=`) — folding it just re-validates the parent.
-  G-020  MPNN parser OMITS a record on threading failure rather than emitting
-         one that points at the parent PDB (which AF2 would re-fold and credit
-         as a false rescue success).
-  G-021  MPNN parser captures global_score/seq_recovery so the auto-chain
-         ranker can pick the best redesigns (not arbitrary FASTA order).
-  G-022  designed_chains whitelist restricted to single chains (multi-chain
-         values crash the MPNN worker / are silently discarded).
-  G-025  Complexa native AF2 axes (ipTM/min_ipae/avg_ipsae/max_ipsae) are
-         aggregated by the evidence reducer (were parsed-but-dropped).
+"""Regression tests for backend output parsing, sequence identity, source diagnostics, and
+supported settings.
 """
 
 from __future__ import annotations
@@ -56,8 +42,6 @@ def _ctx(parent_pdb: str = "") -> ParserContext:
     )
 
 
-# --- G-019: native (parent) record skipped -----------------------------------
-
 def test_mpnn_native_parent_record_skipped(tmp_path: Path):
     out = _write_fa(tmp_path,
                     (_NATIVE_HDR, _SEQ), (_DESIGN1_HDR, _SEQ), (_DESIGN2_HDR, _SEQ))
@@ -67,8 +51,6 @@ def test_mpnn_native_parent_record_skipped(tmp_path: Path):
     gscores = sorted(float(r.bins["mpnn_global_score"]) for r in recs)
     assert gscores == [1.2, 1.8]
 
-
-# --- G-021: MPNN scores captured into bins -----------------------------------
 
 def test_mpnn_scores_captured_into_bins(tmp_path: Path):
     out = _write_fa(tmp_path, (_NATIVE_HDR, _SEQ), (_DESIGN2_HDR, _SEQ))
@@ -85,14 +67,11 @@ def test_mpnn_ranker_negates_global_score_for_higher_is_better():
     global_score is an NLL (lower=better). Lock the negation so the best
     (lowest-NLL) redesign sorts first."""
     def rank_key(global_score: float) -> float:
-        return -float(global_score)  # mirrors controller G-021 branch
-    # design2 (gs=1.2) is better than design1 (gs=1.8) → must sort first
+        return -float(global_score)  # Lower source negative log-likelihood ranks first.
     ranked = sorted([("d1", 1.8), ("d2", 1.2)],
                     key=lambda x: rank_key(x[1]), reverse=True)
     assert ranked[0][0] == "d2"
 
-
-# --- G-020: threading-failure record omitted ---------------------------------
 
 def test_mpnn_threading_failure_omits_record(tmp_path: Path, monkeypatch):
     out = _write_fa(tmp_path, (_NATIVE_HDR, _SEQ), (_DESIGN1_HDR, _SEQ))
@@ -113,8 +92,6 @@ def test_mpnn_threading_success_keeps_threaded_record(tmp_path: Path, monkeypatc
     assert recs[0].artifacts["pdb_path"].endswith(".pdb")
 
 
-# --- G-022 / G-023: source-accurate whitelists -------------------------------
-
 def test_designed_chains_is_controller_owned_not_llm_tunable():
     cap = default_registry().get("proteinmpnn_redesign")
     assert "designed_chains" not in cap.allowed_params
@@ -122,8 +99,6 @@ def test_designed_chains_is_controller_owned_not_llm_tunable():
     assert kept == {}
     assert any(r.startswith("derived_param:designed_chains") for r in reasons)
 
-
-# --- G-025: Complexa native AF2 axes aggregated ------------------------------
 
 def _complexa_rec(rid: str, iptm: float, min_ipae: float) -> ResultRecord:
     return ResultRecord(
@@ -140,15 +115,13 @@ def _complexa_rec(rid: str, iptm: float, min_ipae: float) -> ResultRecord:
 def test_complexa_diagnostic_axes_now_aggregated():
     recs = [_complexa_rec(f"c{i}", iptm=0.55, min_ipae=0.18) for i in range(4)]
     stats = build_diagnostic_axis_stats(recs)
-    # Previously empty for Complexa-only runs; now ipTM/ipSAE/min_ipae appear.
+    # Complexa diagnostics include ipTM, ipSAE, and minimum iPAE.
     assert "ipTM" in stats
     assert "min_ipae" in stats
     assert "avg_ipsae" in stats and "max_ipsae" in stats
     # ipTM 0.55 is below the 0.60 threshold but within the 0.05 near-pass margin
     assert stats["ipTM"].n == 4
 
-
-# --- G-018: greedy knobs gated on refinement_algorithm=sequence_hallucination -
 
 from trex.controller import (
     _complexa_canonical_af2_overrides,
@@ -189,11 +162,8 @@ def test_refinement_algorithm_null_branch():
     assert ov == ["++generation.refinement.algorithm=null"]
 
 
-# --- G-028 / G-029: computed metrics now reach the planner summary -----------
-
 def test_mpnn_scores_reach_planner_alt_model_rollup():
-    """G-028: ProteinMPNN global_score/seq_recovery (bins) are rolled up into
-    diagnostic_alt_model_scores so the planner can see MPNN sequence quality."""
+    """Expose ProteinMPNN source scores in diagnostic summaries."""
     from trex.evidence_reducer import build_diagnostic_alt_model_scores
     recs = [
         ResultRecord(
@@ -214,7 +184,7 @@ def test_mpnn_scores_reach_planner_alt_model_rollup():
 
 
 def test_bindcraft_binder_ptm_now_aggregated():
-    """G-029: BindCraft binder_pTM_avg (was parsed-but-dropped) now aggregates."""
+    """Aggregate the BindCraft source pTM score."""
     recs = [
         ResultRecord(
             result_id=f"b{i}", parent_ids=[], target_id="t1",

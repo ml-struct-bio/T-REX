@@ -23,6 +23,7 @@ from ..output_parsers.bindcraft import parse_bindcraft_output
 from ..output_parsers.boltzgen import parse_boltzgen_output
 from ..output_parsers.complexa import parse_complexa_output
 from ..output_parsers.proteinmpnn import parse_proteinmpnn_output
+from ..output_identity import annotate_output_identity
 from ..refilter_roles import infer_refilter_role
 from ..schemas import ActionCandidate, ResultRecord, TargetConstraint
 
@@ -49,6 +50,7 @@ class WorkerOutputRequest:
     requested_output_directory: Path
     target: TargetConstraint
     tick_id: str
+    target_pdb_path: str = ""
     parent_pdb_path: str = ""
     parent_result_id: str = ""
     target_chains_csv: str = ""
@@ -207,6 +209,10 @@ def _normalize_records(
         bins = dict(record.bins or {})
         artifacts = dict(record.artifacts or {})
         if binder_chain:
+            artifacts.setdefault("input_binder_chain", binder_chain)
+        if target_chains_csv:
+            artifacts.setdefault("input_target_chains", target_chains_csv)
+        if binder_chain:
             bins.setdefault("binder_chain", binder_chain)
             artifacts.setdefault("binder_chain", binder_chain)
         if target_chains_csv:
@@ -265,6 +271,14 @@ def process_worker_output(
         binder_chain=request.binder_chain,
         target_chains_csv=request.target_chains_csv,
     )
+    if request.target_pdb_path:
+        normalized_records = [
+            annotate_output_identity(
+                record, target_pdb=Path(request.target_pdb_path),
+                target_chains=request.target.chain_ids,
+            )
+            for record in normalized_records
+        ]
     return ProcessedWorkerOutput(
         output_directory=output_directory,
         parser_context=parser_context,

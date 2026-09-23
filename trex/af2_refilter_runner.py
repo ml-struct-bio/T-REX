@@ -41,11 +41,8 @@ def main() -> None:
         use_remat=False,
         use_initial_guess=use_ig,
     )
-    # Match Complexa/BindCraft validation: use the designed binder structure as
-    # an AF2 template/initial guess (Bennett-style). Without this (blind
-    # prediction) AF2 fails to recover de-novo binder poses, giving iPAE~0.9 /
-    # scRMSD 20-60 Å for EVERY family — a scorer artifact, not design quality.
-    # alphafold2_reward.py sets use_binder_template = rm_template_ic = use_ig.
+    # With initial guessing enabled, use the designed binder as a template and
+    # remove inter-chain template information, matching the qualification protocol.
     prep_kwargs = dict(
         target_chain=args.target_chain,
         binder_chain=args.binder_chain,
@@ -55,11 +52,8 @@ def main() -> None:
         prep_kwargs["use_binder_template"] = True
         prep_kwargs["rm_template_ic"] = True
     model.prep_inputs(str(args.input_pdb), **prep_kwargs)
-    # CRITICAL (2026-05-28): initialise the binder sequence from the input PDB.
-    # ColabDesign's predict() folds the DEFAULT (uniform) sequence unless one is
-    # set — that gave seq_ent≈ln(20), pLDDT~30, scRMSD~40 Å for EVERY design
-    # (random-sequence fold, a scorer artifact). mode="wildtype" loads the
-    # designed sequence saved from the PDB so we re-fold the ACTUAL design.
+    # Initialize from the input PDB sequence; predict() otherwise uses a uniform
+    # sequence.
     model.set_seq(mode="wildtype")
     aux = model.predict(
         num_models=len(model._model_names),
@@ -110,7 +104,7 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--target-chain", default="A")
     parser.add_argument("--binder-chain", default="B")
     parser.add_argument("--model-names", default="model_1_multimer_v3")
-    parser.add_argument("--num-recycles", type=int, default=3)  # was 0 (bug): AF2 multimer needs recycles to converge
+    parser.add_argument("--num-recycles", type=int, default=3)  # AF2 multimer requires recycling for convergence.
     parser.add_argument("--use-initial-guess", type=int, choices=(0, 1), default=1,
                         help="1=use designed structure as AF2 template/initial guess "
                              "(matches Complexa/BindCraft validation); 0=blind prediction")

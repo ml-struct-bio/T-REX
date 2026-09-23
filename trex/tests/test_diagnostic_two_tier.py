@@ -1,10 +1,5 @@
-"""v7_3 two-tier diagnostic-axis behavior (§4.1 redesign, 2026-06-10).
-
-Pins the new semantics: pass/near/fail are classified against the QUALITY
-threshold; below_accept_count is the subset failing the tool's ACCEPT floor;
-the two previously-dead axes (buried_sasa, binder_pTM) now discriminate; and
-BoltzGen axes are read from r.bins. These are advisory only — none of this
-touches strict_success or SU.
+"""Tests for source acceptance and advisory quality thresholds, including bin-stored
+scores.
 """
 from __future__ import annotations
 
@@ -69,8 +64,7 @@ def test_interface_dG_quality_classification_and_below_accept():
 
 
 def test_buried_sasa_no_longer_dead():
-    # old (1200,'increase',200) passed everything >=1177; new pass=None,
-    # quality=1650, margin=330 -> the 1200-1650 tail now discriminates.
+    # quality=1650 and margin=330 distinguish the 1200-1650 range.
     recs = [
         _bc_rec("a", buried_sasa=1300.0),  # fail (350 below quality > 330)
         _bc_rec("b", buried_sasa=1400.0),  # near (250 <= 330)
@@ -83,8 +77,7 @@ def test_buried_sasa_no_longer_dead():
 
 
 def test_binder_pTM_quality_only_no_floor():
-    # old invented (0.60,'increase',0.05) sat below the whole range -> 100% pass.
-    # new pass=None, quality=0.79, margin=0.05 flags the low-confidence tail.
+    # A quality threshold of 0.79 with margin 0.05 distinguishes the low-confidence tail.
     recs = [
         _bc_rec("a", binder_pTM_avg=0.61),  # fail (0.18 below quality)
         _bc_rec("b", binder_pTM_avg=0.75),  # near (0.04 <= 0.05)
@@ -96,8 +89,6 @@ def test_binder_pTM_quality_only_no_floor():
 
 
 def test_boltzgen_axes_read_from_bins():
-    # BoltzGen previously had ZERO diagnostic axes. design_to_target_iptm:
-    # pass=0.50, quality=0.60, increase, margin=0.09.
     recs = [
         _bg_rec("a", design_to_target_iptm=0.72, design_ptm=0.85),  # pass
         _bg_rec("b", design_to_target_iptm=0.55, design_ptm=0.82),  # near
@@ -142,9 +133,8 @@ def test_near_band_never_overflows_accept_floor():
 
 
 def test_coverage_is_per_source_not_global():
-    # A BoltzGen-heavy window must NOT dilute the BindCraft axes below the 25%
-    # gate (the C-6 bug). 4 BindCraft + 20 BoltzGen: a global denominator (24)
-    # would drop interface_dG (4 < 0.25*24=6); per-source (denom=4) keeps it.
+    # Coverage uses the source-family count. With 4 BindCraft and 20 BoltzGen results,
+    # a global 25% gate would incorrectly discard all four BindCraft observations.
     bc = [_bc_rec(f"bc{i}", interface_dG=-55.0) for i in range(4)]
     bg = [_bg_rec(f"bg{i}", design_to_target_iptm=0.62) for i in range(20)]
     stats = build_diagnostic_axis_stats(bc + bg)
@@ -165,7 +155,7 @@ def test_label_axis_rejects_nonfinite():
 def test_foldseek_decouples_collapse_from_su_objective():
     # The live SU objective uses TM 0.60 (easy-cluster
     # --tmscore-threshold 0.6 on binder chains); the collapse / near-miss diversity
-    # T-ReX live control keeps strict-SU, recent collapse, and near-miss dedup
+    # T-REX live control keeps strict-SU, recent collapse, and near-miss dedup
     # on the same TM0.60 structural novelty threshold. TM0.5/TM0.8 are
     # post-hoc reporting or explicit ablation thresholds.
     cfg = FoldseekConfig()
@@ -229,7 +219,7 @@ def test_worst_actionable_diagnostic_skips_corroboration_only():
 def test_planner_prompt_surfaces_lever_map():
     from trex.planner import PLANNER_SYSTEM
     assert "DIAGNOSTIC REMEDIATION LEVERS" in PLANNER_SYSTEM
-    assert "weights_iptm" in PLANNER_SYSTEM            # the real lever, now surfaced
+    assert "weights_iptm" in PLANNER_SYSTEM  # Actionable diagnostic measurement.
     assert "CORROBORATION-ONLY" in PLANNER_SYSTEM
     assert "shape_complementarity" in PLANNER_SYSTEM   # listed as corroboration-only
 

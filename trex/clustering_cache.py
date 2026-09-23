@@ -1,4 +1,4 @@
-"""Exact in-process caches for T-ReX clustering passes.
+"""Exact in-process caches for T-REX clustering passes.
 
 These helpers deliberately cache only *identical full input sets*. They are not
 incremental clustering: if a new strict success or near-miss enters a pass, the
@@ -18,6 +18,7 @@ from typing import Any
 from .foldseek_clusterer import (
     ClusteringResult,
     _record_binder_chain,
+    _pdb_for_result,
     _scored_pdb_path,
     cluster_archive_pdbs,
 )
@@ -33,26 +34,25 @@ _FOLDSEEK_CACHE: OrderedDict[str, ClusteringResult] = OrderedDict()
 _MMSEQS_CACHE: OrderedDict[str, SequenceClusteringResult] = OrderedDict()
 _CACHEABLE_STATUSES = {"ok", "no_structures", "no_sequences"}
 
-# R4a (2026-06-01): read-through memo for binder-sequence extraction. The mmseqs
-# fingerprint runs _sequence_for_result on every call (incl. cache hits); for
-# PDB-only strict records that re-reads+parses the PDB each tick. Memo by
-# (result_id, pdb_path, mtime_ns, binder_chain) — a stat() per call is far
-# cheaper than read+parse — reusing the EXACT extraction fn (no drift). Bounded.
+# Cache the full sequence-extraction input, including identity verification and
+# inline sequences. Recovery can change the source without changing a file.
 _SEQ_EXTRACT_CACHE: "OrderedDict[tuple, tuple[str, str]]" = OrderedDict()
 _MAX_SEQ_EXTRACT_ENTRIES = 8192
 
 
 def _cached_sequence_for_result(r: ResultRecord, binder_chain_id: str) -> tuple[str, str]:
     art = r.artifacts or {}
-    pdb = art.get("pdb_path", "")
-    mtime = -1
-    if pdb:
-        try:
-            mtime = Path(pdb).stat().st_mtime_ns
-        except OSError:
-            mtime = -1
+    path = _pdb_for_result(r)
+    fingerprint = _file_fingerprint(path) if path is not None else {}
     record_chain = _record_binder_chain(r, binder_chain_id)
-    key = (r.result_id, pdb, mtime, record_chain)
+    key = (
+        r.target_id,
+        r.result_id,
+        tuple(sorted(fingerprint.items())),
+        record_chain,
+        "output_chain_map" in art,
+        tuple(art.get(name) for name in ("binder_sequence", "sequence", "seq")),
+    )
     hit = _SEQ_EXTRACT_CACHE.get(key)
     if hit is not None:
         _SEQ_EXTRACT_CACHE.move_to_end(key)
@@ -129,9 +129,8 @@ def _foldseek_input_fingerprint(
             continue
         if only_result_ids is not None and r.result_id not in only_result_ids:
             continue
-        # Shared predicate with cluster_archive_pdbs — they MUST agree on which
-        # records are clustered, else a cache hit could serve a clustering over a
-        # different input set. _scored_pdb_path is the single source (R1/R4b).
+        # Use the same eligibility predicate as clustering so a cache hit represents the
+        # same input set.
         path = _scored_pdb_path(r)
         if path is None:
             continue
@@ -161,7 +160,7 @@ def cluster_archive_pdbs_cached(
     *,
     target_id: str,
     foldseek_binary: str = "foldseek",
-    min_tm_score: float = 0.60,  # T-ReX live objective; report 0.5/0.6/0.8 as a sweep.
+    min_tm_score: float = 0.60,  # T-REX live objective; report 0.5/0.6/0.8 as a sweep.
     timeout_seconds: int = 600,
     only_result_ids: set[str] | None = None,
     structure_scope: str = "binder_chain",

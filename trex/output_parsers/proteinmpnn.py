@@ -1,22 +1,7 @@
-"""Parse ProteinMPNN output (FASTA in seqs/*.fa) into T-ReX ResultRecord(s).
+"""Parse redesigned ProteinMPNN sequences from seqs/*.fa.
 
-P2-D (2026-05-26): ProteinMPNN does NOT include a fold-evaluation step —
-it emits redesigned sequences on the parent backbone. ResultRecord.metrics
-is left empty; the LLM is expected to chain MPNN with a refilter (typically
-structure_refilter / AF2) in a later tick if it wants pLDDT/iPAE.
-
-HIGH 2 fix (2026-05-26): the parent PDB path is propagated through
-``artifacts["pdb_path"]``.
-
-fix24 (2026-05-26): semantic-correctness fix on top of HIGH 2. The earlier
-HIGH 2 path stored the *parent* backbone PDB as ``pdb_path``, but AF2
-refilter (af2_refilter_runner with ``rm_binder_seq=False``) reads the
-sequence directly from the PDB chains. That meant AF2 re-folded the
-PARENT'S sequence, not the MPNN-redesigned one — MPNN's work was
-discarded and the chain produced no new information. Now: thread the
-MPNN sequence onto the parent backbone (rename binder-chain residues,
-strip side chains, keep N/CA/C/O atoms), write a new PDB per sequence,
-and store THAT as ``pdb_path``. AF2 then sees the MPNN sequence.
+Thread each sequence onto the parent backbone and store its own PDB. Qualification
+measurements remain empty until standardized evaluation.
 """
 
 from __future__ import annotations
@@ -54,7 +39,7 @@ _AA1_TO_3 = {
     "S": "SER", "T": "THR", "W": "TRP", "Y": "TYR", "V": "VAL",
 }
 _BACKBONE_ATOMS = {"N", "CA", "C", "O"}
-_BINDER_CHAIN_DEFAULT = "B"  # T-ReX convention
+_BINDER_CHAIN_DEFAULT = "B"  # T-REX convention
 
 
 def _read_fasta(text: str) -> list[tuple[str, str]]:
@@ -181,12 +166,7 @@ def parse_proteinmpnn_output(
     n_thread_failed = 0
     for fa in fa_files:
         for idx, (header, seq) in enumerate(_read_fasta(fa.read_text())):
-            # G-019 (2026-05-29): the first FASTA entry per file is
-            # ProteinMPNN's NATIVE (parent) sequence (protein_mpnn_run.py:355-384),
-            # written with a header that has no ``sample=`` field. It is the
-            # unchanged parent, not a redesign — folding it just re-validates
-            # the parent and pollutes the rescue signal. Skip it. Generated
-            # sequences (line 403) always carry ``sample=``.
+            # Skip the native parent FASTA entry, which lacks a sample identifier.
             if "sample=" not in header:
                 n_native_skipped += 1
                 continue
@@ -200,8 +180,8 @@ def parse_proteinmpnn_output(
                 "fa_path": str(fa),
             }
             if parent_pdb_path:
-                # fix24: produce a properly threaded PDB so AF2 chain
-                # actually folds the MPNN sequence (not the parent's).
+                # Write the redesigned sequence into its own backbone structure for
+                # evaluation.
                 threaded_pdb = threaded_dir / f"{fa.stem}_seq{idx:03d}.pdb"
                 ok = _thread_sequence_onto_pdb(
                     Path(parent_pdb_path),
@@ -214,22 +194,12 @@ def parse_proteinmpnn_output(
                     artifacts["parent_pdb"] = parent_pdb_path
                     artifacts["threaded"] = "true"
                 else:
-                    # G-020 (2026-05-29): threading failed (length mismatch /
-                    # binder not on chain B / parse error). Do NOT emit a record
-                    # pointing at the parent PDB: the AF2 refilter folds the
-                    # sequence sitting on the binder chain (set_seq wildtype), so
-                    # a parent-fallback record would re-fold the PARENT and be
-                    # credited as a rescue success — corrupting the rescue-lane
-                    # signal and wasting an AF2 slot. Drop it; the controller's
-                    # synth-summary still books the gpu_h so method_health stays
-                    # accurate even if every sequence fails to thread.
+                    # Skip threading failures; pointing to the parent would evaluate the
+                    # wrong sequence. The controller retains the job compute even when
+                    # no records remain.
                     n_thread_failed += 1
                     continue
-            # G-021 (2026-05-29): capture MPNN's own quality scores so the
-            # auto-chain ranker can pick the best redesigns for the budget-
-            # limited AF2 refold. global_score is per-residue NLL (lower=better,
-            # protein_mpnn_run.py:339), seq_recovery is fraction native recovered
-            # (higher). Diagnostic (not AF2-calibrated) → stored in bins.
+            # Keep source scores as diagnostics for evaluation ordering.
             bins = {"sample_index": str(idx), "source_fa": fa.name,
                     "redesigned_sequence": seq[:64]}
             hdr_fields = _parse_mpnn_header(header)

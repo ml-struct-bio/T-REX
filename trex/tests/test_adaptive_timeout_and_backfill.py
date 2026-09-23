@@ -1,20 +1,5 @@
-"""Adaptive timeout + chain backfill (2026-05-30, L1+L2).
-
-L1 (rev3, no liveness probe): the fixed FAMILY_TIMEOUT_S censored productive work
-(calibration showed 100% of bindcraft / ~42% mcts / ~43% fk_steering ran to the
-cap and were cut). CPU/file liveness probes proved the WRONG signal (the work is
-on the GPU; a GPU-bound worker is ~0% CPU; the shared inference dir collides
-across jobs) and twice false-killed productive runs. The reap loop now kills
-non-BindCraft families only past a generous per-family HARD CEILING. BindCraft has
-no absolute per-worker ceiling; it is killed only when it produced no NEW accepted
-design for BINDCRAFT_YIELD_WINDOW_S past BINDCRAFT_FLOOR_S (its busy-but-
-unproductive failure mode). The yield clock is primed on the first post-floor
-probe, so a family whose floor exceeds the yield window is never insta-killed.
-
-L2: the MPNN->AF2 auto-chain created 148 chain candidates but the selector
-rejected all of them (lost the rescue-quota to re-tagged generators), so MPNN
-sequences were never scored. `_chain_backfill_ids` returns feasible unlaunched
-chain refilters to backfill ONLY idle slots (never displacing a generator).
+"""Regression tests for worker timeouts, incremental output recovery, and evaluation
+backfill.
 """
 
 from __future__ import annotations
@@ -76,8 +61,6 @@ from trex.schemas import (
 )
 
 
-# --- L1: hard ceiling + bindcraft productivity (accepted designs), no probe ---
-
 def test_bindcraft_accepted_count(tmp_path: Path):
     assert _bindcraft_accepted_count(tmp_path) is None        # nothing yet
     assert _bindcraft_accepted_count(None) is None
@@ -121,8 +104,6 @@ def test_bindcraft_progress_count_includes_intermediate_outputs(tmp_path: Path):
     assert _bindcraft_progress_count(tmp_path) >= 4
 
 
-
-
 def _started(cid: str, i: int = 0) -> DispatchRecord:
     return DispatchRecord(
         dispatch_id=f"d_{cid}_{i}", tick_id="t", candidate_id=cid,
@@ -161,9 +142,7 @@ def test_adaptive_kill_decision():
     now = time.time()
     bc_ceiling = HARD_CEILING_S["bindcraft"]        # reference only for BindCraft
     mcts_ceiling = HARD_CEILING_S["complexa_mcts"]  # 2.5 h
-    # REGRESSION GUARD: a bindcraft worker JUST past the floor (first probe ->
-    # just primed, last_yield_at=now) must NOT be killed, even though elapsed
-    # (>floor) exceeds the yield window. The old bug insta-killed at the floor.
+    # A newly primed worker beyond the minimum runtime must receive its full yield window.
     assert not _would_kill(BINDCRAFT_FLOOR_S + 1, bc_ceiling, fam="bindcraft",
                            now=now, last_yield_at=now, primed=True)
     # non-bindcraft under its ceiling is NEVER killed (no liveness probe) ...
@@ -188,11 +167,11 @@ def test_adaptive_kill_decision():
     # bindcraft below the floor -> never killed
     assert not _would_kill(1000, bc_ceiling, fam="bindcraft",
                            now=now, last_yield_at=now - 9999, primed=False)
-    # bindcraft past the old 5h reference but still producing -> KEEP
+    # Continue while new accepted outputs arrive.
     assert not _would_kill(bc_ceiling + 1000, bc_ceiling, fam="bindcraft",
                            now=now, last_yield_at=now - 9999, primed=True,
                            accepted_count=4, prev_yield_n=3)
-    # bindcraft past the old 5h reference and no-yield -> KILL by watchdog, not ceiling
+    # Stop after the configured interval without new accepted outputs.
     assert _would_kill(bc_ceiling + 1000, bc_ceiling, fam="bindcraft",
                        now=now,
                        last_yield_at=now - (BINDCRAFT_YIELD_WINDOW_S + 60),
@@ -270,8 +249,6 @@ def test_bindcraft_incremental_parse_dedupes_and_delta_charges(tmp_path: Path, m
     assert ids.count("bc_B") == 1
     assert abs(sum(float(r.gpu_h) for r in records) - 3.5) < 1e-9
 
-
-# --- L2: chain backfill -----------------------------------------------------
 
 def _chain(cid: str, ok: bool = True) -> ActionCandidate:
     feas = FeasibilityCheck(ok, "rb1", True, True, True, ok)
@@ -457,7 +434,6 @@ def test_deep_stall_throttled_chain_is_backfill_recoverable(tmp_path: Path):
         why="current tick state=deep_stall; cancelled deterministic diagnostic score-conversion reserve before dispatch",
     ))
     assert _chain_backfill_ids(arc, seen=set(), max_n=2) == ["chain_a"]
-
 
 
 def test_backfill_respects_seen_and_cap(tmp_path: Path):
@@ -852,7 +828,6 @@ def test_route_evidence_snapshots_canonical_conversion_count():
     assert family.canonical_score_conversion_count == 1
 
 
-
 class _FakeProc:
     def poll(self):
         return None
@@ -948,8 +923,7 @@ def test_chain_refilter_reserve_adaptive_scales_to_backlog(monkeypatch):
     monkeypatch.delenv("TREX_CHAIN_REFILTER_HIGH_BACKLOG_MIN", raising=False)
     # 2 free -> reserve 1, generate 1
     assert _chain_refilter_reserve_limit(2, backlog_n=99) == 1
-    # 1 free -> reserve the only slot (no room to keep a generation slot);
-    # matches the legacy single-slot preempt behavior
+    # With one free slot, score conversion reserves it; no second slot is free.
     assert _chain_refilter_reserve_limit(1, backlog_n=99) == 1
     # 0 free -> 0
     assert _chain_refilter_reserve_limit(0, backlog_n=99) == 0
@@ -968,8 +942,6 @@ def test_chain_refilter_reserve_adaptive_respects_fraction_env(monkeypatch):
     # malformed -> default 0.5
     monkeypatch.setenv("TREX_CHAIN_REFILTER_RESERVE_MAX_FRACTION", "oops")
     assert _chain_refilter_reserve_limit(3, backlog_n=10) == 2
-
-
 
 
 def test_chain_backfill_caps_weak_score_conversion_by_family(tmp_path: Path, monkeypatch):
@@ -1168,13 +1140,7 @@ def test_chain_refilter_reserve_per_round_cap(tmp_path: Path, monkeypatch):
 
 
 def test_score_conversion_reserve_can_use_single_slot_when_feedback_pending(tmp_path: Path, monkeypatch):
-    """Regression: event-driven runs usually free one GPU at a time.
-
-    The caller used to pass queue_room=free_slots-1, so canonical scoring never
-    launched in the single-slot case and diagnostic generators looked like dry
-    zero-SU routes. A real unscored diagnostic artifact must open that one slot
-    to the bounded score-conversion reserve.
-    """
+    """Allow bounded evaluation work when a single worker is free and artifacts await scores."""
     monkeypatch.delenv("TREX_CHAIN_REFILTER_RESERVE_PER_ROUND", raising=False)
     arc = Archive(tmp_path / "single_slot_score")
     pdb = tmp_path / "bc_parent.pdb"
@@ -1410,7 +1376,7 @@ def _bc_chain_near(rid):
 
 
 def test_family_circuit_broken(tmp_path: Path):
-    """BindCraft breaker trips at >= N timeouts with 0 strict SU (Fix 1)."""
+    """Trip the BindCraft circuit breaker after the configured number of unproductive timeouts."""
     from trex.controller import _family_circuit_broken
     arc = Archive(tmp_path / "cb")
     assert not _family_circuit_broken(arc, "bindcraft", max_timeouts=2, min_gpu_h=3.0)   # empty
@@ -1621,7 +1587,6 @@ def test_score_conversion_scores_all_diagnostic_artifacts_in_priority_order(tmp_
     assert selected_ids[-1] == "cx_hi11"
 
 
-
 def test_auto_chain_cap_scores_all_without_signal(tmp_path: Path, monkeypatch):
     arc = Archive(tmp_path / "cap_default")
     records = [ResultRecord(
@@ -1660,8 +1625,6 @@ def test_bindcraft_env_cap_does_not_leave_accepted_artifacts_unscored(tmp_path: 
 
     assert _auto_chain_cap_for_diagnostic_launch(
         arc, "bindcraft", records, source_candidate=None) == 4
-
-
 
 
 def test_select_score_conversion_parents_keeps_same_sequence_distinct_artifacts(tmp_path: Path):
@@ -1809,7 +1772,6 @@ def test_chain_refilter_recent_share_cap_bootstrap_blocks_early_burst(tmp_path: 
     assert _chain_refilter_recent_share_cap(arc, 3, ["chain_new"]) == 0
 
 
-
 def test_chain_refilter_recent_share_cap_default_bootstrap_uses_share_budget(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TREX_CHAIN_REFILTER_SHARE_WINDOW", "40")
     monkeypatch.setenv("TREX_CHAIN_REFILTER_SHARE_MIN_N", "20")
@@ -1829,9 +1791,8 @@ def test_chain_refilter_recent_share_cap_default_bootstrap_uses_share_budget(tmp
             why="history"))
         arc.append(_started(f"cand_old_{i}", i))
 
-    # Default bootstrap allowance follows max_share * min_n = 12, so the fifth
-    # score-conversion job is not blocked. A user can still force the old cap by
-    # setting TREX_CHAIN_REFILTER_BOOTSTRAP_MAX=4.
+    # The default bootstrap allowance follows max_share times min_n; an explicit
+    # environment override can lower it.
     assert _chain_refilter_recent_share_cap(arc, 3, ["chain_new"]) == 3
 
 
@@ -1881,8 +1842,7 @@ def test_boltzgen_noncanonical_binder_residue_detector(tmp_path: Path):
 
 
 def test_f5_breaker_prebuilt_index_matches_self_built(tmp_path: Path):
-    """F5: passing a pre-built index (built once/round) must give the SAME breaker
-    decision as letting the function build it itself."""
+    """A supplied archive index must preserve the breaker decision."""
     from trex.controller import _family_circuit_broken
     from trex.live_tick import _index_actions_by_spawned_result
 

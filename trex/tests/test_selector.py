@@ -144,9 +144,8 @@ def test_untrusted_foldseek_su_does_not_drive_route_value_selection():
 
 
 def test_realization_feasibility_with_mass_on_excluded_mode():
-    # The hard case: the mixture is concentrated on a mode that is INFEASIBLE.
-    # Every method must still allocate 0 to it AND keep sum==n (the swappable-
-    # realization contract). largest_remainder used to violate both here.
+    # An infeasible mode receives no jobs while feasible modes fill the available
+    # slots.
     feas = {"rescue", "explore"}
     mix = {"exploit": 1.0, "rescue": 0.0, "explore": 0.0}
     for method in ("deterministic_deficit", "largest_remainder", "stochastic"):
@@ -326,9 +325,8 @@ def test_production_defaults_keep_only_bounded_quota_safeguards():
 
 
 def test_cross_family_escape_floor_launches_even_if_supervisor_omits_it():
-    # Regression for BetV1/SC2RBD-style dry runs: Builder creates evidence_fallback
-    # cross-family candidates, but the Supervisor may only rank stale same-root
-    # replay candidates. Selector must not let that erase the escape floor.
+    # The Supervisor may rank only same-root replay candidates. Cross-family
+    # fallback candidates remain eligible for the configured escape floor.
     e = dataclasses.replace(
         _evidence("deep_stall"),
         gpu_h_since_last_su=14.0,
@@ -362,10 +360,8 @@ def test_cross_family_escape_floor_launches_even_if_supervisor_omits_it():
 
 
 def test_cross_family_escape_floor_does_not_replace_rank1_single_slot():
-    # Live CD45 regression: a one-slot tick had an explicit rank-1 explore
-    # candidate, but the deterministic floor replaced it with a repeated
-    # BoltzGen fallback. A safeguard may replace omitted/lower-ranked work, not
-    # become the policy by erasing the LLM's strongest current decision.
+    # A one-slot escape floor must preserve the Supervisor's rank-1 candidate;
+    # it may replace only omitted or lower-ranked work.
     e = dataclasses.replace(
         _evidence("deep_stall"),
         gpu_h_since_last_su=14.0,
@@ -398,10 +394,8 @@ def test_cross_family_escape_floor_does_not_replace_rank1_single_slot():
     )
 
 def test_cross_family_escape_floor_skips_backlog_saturated_deferred_generator():
-    # TNF-alpha regression: a dry route-deferred diagnostic generator with a
-    # large unscored backlog should not be revived by the cross-family escape
-    # floor as another fresh generation. The Supervisor's concrete rescue card
-    # should keep the slot.
+    # A deferred generator with a large unscored backlog must not consume the
+    # escape floor. Preserve the selected rescue candidate's worker slot.
     from trex.schemas import RouteValueSummary
 
     e = dataclasses.replace(
@@ -540,10 +534,7 @@ def test_promising_backlog_does_not_make_fallback_saturated_or_override_rank1():
 
 
 def test_hybrid_budget_follows_ranking_not_contradictory_scalar():
-    # The scalar mode_mixture is exploit-heavy, but the RANKED decisions favor
-    # explore. With the hybrid flag ON (opt-in) the budget derives from the
-    # ranking → an explore candidate launches; with the flag OFF (the v7_3
-    # DEFAULT, scalar-driven) explore is starved. This pins both flag behaviors.
+    # Check both scalar-mixture and opt-in rank-derived allocation.
     e = _evidence("productive")
     cands = [
         _cand("c1", "complexa_beam"), _cand("c2", "complexa_beam"),
@@ -611,7 +602,6 @@ def test_high_cost_capacity_pressure_prefers_launchable_alternative():
     assert dbg["rank1_not_launched"][0]["reason"].startswith(
         "capacity_pressure_high_cost_running_cap:family=bindcraft"
     )
-
 
 
 def test_high_cost_queued_only_does_not_capacity_block_fresh_candidate():
@@ -953,8 +943,6 @@ def test_select_respects_supervisor_ranking():
     launches, dbg = select_launches(e, cands, sup, cfg=SelectorConfig(available_slots=3))
     selected = [l.candidate_id for l in launches if l.status == "launched"]
     assert "c1" in selected
-    # v7_3 hybrid: the budget is now derived from the ranked decisions (the source
-    # label reflects that); still a supervisor source, never fallback.
     assert dbg["source"].startswith("supervisor")
 
 
@@ -1047,12 +1035,7 @@ def test_selected_candidate_is_not_also_logged_rejected():
 
 
 def test_hinted_candidate_unranked_by_supervisor_is_grouped_and_launched():
-    """Regression (2026-05-29): an auto-chain candidate merged into the pool
-    AFTER the supervisor ranked the fresh candidates is NOT in sup_decs, so it
-    must resolve its mode from candidate_mode_hint EVEN on the supervisor-ranked
-    path — otherwise it gets no mode, never enters a quota, and only backfill
-    (which never fires under busy=3/3) could launch it → it accumulates
-    unlaunched and the proteinMPNN→AF2 rescue chain stays inert."""
+    """Use the candidate mode hint for a candidate absent from Supervisor recommendations."""
     e = _evidence("rescue_rich")
     fresh = _cand("c_fresh", family="complexa_beam")
     chain = _cand("chain_t1_mpnn_to_refilter_001", family="structure_refilter", refilter_role=CANONICAL_SCORE_CONVERSION)
@@ -1069,9 +1052,7 @@ def test_hinted_candidate_unranked_by_supervisor_is_grouped_and_launched():
     assert "chain_t1_mpnn_to_refilter_001" in launched, (
         "hinted chain candidate must launch, not be stranded"
     )
-    # R3 (2026-06-01): the chain candidate still COMPETES in the rescue quota via
-    # its mode_hint, but its RECORDED realised mode is "chain_refilter" (a
-    # deterministic system lane) so it does not consume the LLM rescue K-window.
+    # System evaluation does not consume the scientific mode-history quota.
     assert launched["chain_t1_mpnn_to_refilter_001"].resource_class_concrete.get("mode") == "chain_refilter"
 
 
@@ -1106,8 +1087,6 @@ def test_canonical_refilter_records_chain_mode_without_chain_prefix():
     assert launched[0].resource_class_concrete.get("mode") == "chain_refilter"
     assert launched[0].resource_class_concrete.get("refilter_role") == CANONICAL_SCORE_CONVERSION
 
-
-# ---- GAP 1: cost-aware family admission (soft within-mode demotion) ----------
 
 def _evidence_with_mh(mh: dict):
     from dataclasses import replace
@@ -1166,7 +1145,7 @@ def test_cost_aware_tiebreak_demotes_dominated_low_yield_family_with_some_su():
     """A family with nonzero SU can still be the wrong next launch when it
     has burned enough GPU-h and is strongly dominated by another family on
     chained/direct SU per worker-GPU-h. This catches the BindCraft-heavy failure
-    mode from the live T-ReX traces without naming a target."""
+    mode from the live T-REX traces without naming a target."""
     e = _evidence_with_mh({
         "bindcraft": {
             "cumulative_gpu_h": 20.0,
@@ -1281,8 +1260,6 @@ def test_cost_aware_comparator_ignores_tiny_lucky_best_rate():
     assert penalties.get("bindcraft", 0) < 2
 
 
-# F2 (2026-06-18): cost-deferral must not defeat the collapse explore floor.
-
 def test_f2_deferred_explore_family_preserved_under_collapse_clamp():
     """Under a Category-B clamp (stalled), the explore FLOOR must still be able to
     launch a deferred (dead) explore family — deferral must not zero explore."""
@@ -1325,9 +1302,6 @@ def test_f6_family_cost_penalties_for_cfg_matches_inline_and_toggle():
     )
     assert family_cost_penalties_for_cfg(
         e, SelectorConfig(cost_aware_family_tiebreak=False)) == {}
-
-
-# ---- allocation-001 (2026-06-18): fallback within-mode ranking uses SU/GPU-h ----
 
 
 def test_alloc001_fallback_tiebreak_prefers_higher_su_per_gpuh():

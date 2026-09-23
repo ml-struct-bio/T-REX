@@ -6,7 +6,7 @@ Reads:
     <output_dir>/designs/Accepted/*.pdb
     <output_dir>/designs/Rejected/*.pdb
 
-Output schema mapping (verified against real BindCraft job 8736558):
+Output schema mapping:
 
   Native proxy axes (3) — populate diagnostic metrics only:
     bindcraft_native_pLDDT       := row["modelN_pLDDT"] * 100.0
@@ -15,7 +15,7 @@ Output schema mapping (verified against real BindCraft job 8736558):
     These never populate pLDDT/iPAE/binder_scRMSD strict-gate keys;
     canonical structure_refilter does that for official strict/SU.
 
-  Diagnostic axes (Tier 1, §4.1) — populate via the "Average_*" columns,
+  Auxiliary diagnostic axes — populate via the "Average_*" columns,
   which are mean over the 5 AF2 prediction models per design:
     metrics["interface_dG"]               := row["Average_dG"]
     metrics["shape_complementarity"]      := row["Average_ShapeComplementarity"]
@@ -37,10 +37,10 @@ Output schema mapping (verified against real BindCraft job 8736558):
     bindcraft_filter_status := "accepted" or "rejected" in bins
 
 Filter rules:
-  - BindCraft's Accepted/Rejected split is NOT the T-ReX strict gate.
+  - BindCraft's Accepted/Rejected split is NOT the T-REX strict gate.
     Both directories emit diagnostic artifacts when a PDB exists.
   - BindCraft-native metrics remain diagnostic-only. A rejected artifact can
-    still pass T-ReX after canonical AF2 score conversion.
+    still pass T-REX after canonical AF2 score conversion.
   - Empty CSV with artifact PDBs → emit metric-light artifacts for downstream
     score conversion.
 """
@@ -83,10 +83,7 @@ def _parse_design_time(value: str | None) -> float:
     return h + mn / 60.0 + s / 3600.0
 
 
-# Calibrated from smoke 8736558: 12h budget produced ~12 accepted
-# designs ⇒ ~1.0 GPU-h per accepted design (incl. failed trajectories).
-# Used by parser as a stable proxy until BindCraft wrapper logs actual
-# per-design GPU-h. State classifier reads this for budget tracking.
+# Parser fallback cost; the controller replaces it with measured job compute.
 BINDCRAFT_GPU_H_PER_DESIGN = 1.0
 
 
@@ -106,7 +103,6 @@ def _safe_float(value: Any) -> float | None:
 def _result_id(target_id: str, candidate_id: str, design_name: str) -> str:
     blob = f"{target_id}::{candidate_id}::{design_name}".encode()
     return hashlib.sha256(blob).hexdigest()[:16]
-
 
 
 def _plddt_to_100(value: float | None) -> float | None:
@@ -227,12 +223,12 @@ def _artifact_record(
 def parse_bindcraft_output(
     output_dir: Path, ctx: ParserContext
 ) -> list[ResultRecord]:
-    """Convert a BindCraft output directory into T-ReX ResultRecords.
+    """Convert a BindCraft output directory into T-REX ResultRecords.
 
     Robustness invariants:
       - Missing designs/ → ParseError.
       - Missing Accepted/ is not enough to return []: Rejected/ artifacts can
-        still pass T-ReX's canonical AF2 strict gate after score conversion.
+        still pass T-REX's canonical AF2 strict gate after score conversion.
       - CSV row without matching artifact PDB is ignored.
       - Artifact PDB without CSV row emits a metric-light record so canonical
         score conversion can still evaluate it.
@@ -335,7 +331,7 @@ def _bc_bins(
 
     All diagnostic — NOT the strict gate, which comes from canonical
     structure_refilter. The filter_status is preserved so the LLM can learn
-    when BindCraft rejected a sample that T-ReX later validates.
+    when BindCraft rejected a sample that T-REX later validates.
     """
     b: dict[str, str] = {
         "design": design,

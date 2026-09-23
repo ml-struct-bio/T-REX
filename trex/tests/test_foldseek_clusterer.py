@@ -1,13 +1,5 @@
-"""Unit tests for `foldseek_clusterer` — the 2026-05-27 Foldseek wire-up
-that closes the plan §-0.5 SU dedup design-debt gap.
-
-The actual `foldseek easy-cluster` binary is not assumed installed in
-CI. Tests cover:
-  - graceful degradation when binary missing
-  - filtering (target_id mismatch, exit_status, missing PDB)
-  - single-structure short-circuit
-  - cluster TSV parsing (mocked binary)
-  - apply_clusters_to_bins mutation behavior
+"""Test clustering eligibility, degradation, identifier parsing, and in-memory cluster
+assignment with mocked Foldseek execution.
 """
 
 from __future__ import annotations
@@ -50,12 +42,7 @@ def test_controller_preflight_returns_resolved_foldseek_path():
 
 
 def test_resolve_stem_handles_multimodel_and_chain_suffixes():
-    """2026-05-31 fairness audit: foldseek appends chain AND multi-MODEL tokens
-    to input stems (af2_refilter saves all AF2 models). The mapping must strip
-    ALL trailing _<token> segments back to the result_id, else most strict
-    records get NO foldseek_su bin. Historically that split the fallback
-    dedup keyspace and over-counted SU; with official no-fallback it would lose
-    valid SU credit."""
+    """Map Foldseek chain and model suffixes back to the original result identifier."""
     n2r = {"abc123def456": "abc123def456"}   # result_id = hex (no underscore)
     assert _resolve_stem("abc123def456", n2r) == "abc123def456"          # exact
     assert _resolve_stem("abc123def456_A", n2r) == "abc123def456"        # chain suffix
@@ -64,10 +51,7 @@ def test_resolve_stem_handles_multimodel_and_chain_suffixes():
     assert _resolve_stem("unknown_stem_xyz", n2r) is None                # no match
 
 
-# Strict-success thresholds + a tiny margin so the fixture clearly passes.
-# Foldseek clusterer never reads `metrics`, so the only purpose here is to
-# (a) satisfy ResultRecord's required field, (b) avoid hardcoded magic
-# numbers that diverge from the §2.5 SSOT.
+# Construct a passing fixture from shared thresholds.
 _PASS_METRICS = {
     "pLDDT":         STRICT_SUCCESS["pLDDT"][0] + 2.0,         # 92.0
     "iPAE":          STRICT_SUCCESS["iPAE"][0] - 0.05,         # ~0.176
@@ -112,7 +96,7 @@ def _result(
     return ResultRecord(
         result_id=rid, parent_ids=[], target_id=target,
         backend_family="bindcraft", runtime_bucket_id="rb_v7",
-        metrics=dict(_PASS_METRICS),  # SSOT-derived strict-pass fixture
+        metrics=dict(_PASS_METRICS),
         metrics_calibrated={},
         route_lineage=[], gpu_h=1.0, exit_status=exit_status,  # type: ignore[arg-type]
         bins=bins if bins is not None else {"design": "d1"},
@@ -374,11 +358,6 @@ def test_apply_clusters_empty_map_is_noop(tmp_path: Path):
     assert "foldseek" not in r1.bins
 
 
-# ---------------------------------------------------------------------------
-# NEW-001 (2026-06-18): scope-fallback must NOT inflate the SU numerator
-# ---------------------------------------------------------------------------
-
-
 def _fake_singleton_cluster(cmd, **_kwargs):
     """Stand-in for `foldseek easy-cluster`: writes a *_cluster.tsv that makes
     every file actually present in the input dir its own singleton cluster.
@@ -393,11 +372,9 @@ def _fake_singleton_cluster(cmd, **_kwargs):
 
 
 def test_binder_chain_extraction_failure_is_excluded_not_minted(tmp_path: Path):
-    """NEW-001: a strict structure whose binder chain cannot be extracted (here a
-    .cif, which `_write_chain_only_pdb` rejects) must NOT be copied as a FULL
-    complex into the binder-chain easy-cluster run — that would form a bogus
-    singleton and INFLATE SU while coverage still read 1.0. It is skipped (counted
-    in n_scope_fallback, gets no foldseek_su bin → refilter_source fallback)."""
+    """An unresolved binder chain cannot become a whole-complex singleton in binder-only
+    clustering.
+    """
     good1 = tmp_path / "g1.pdb"; _make_two_chain_pdb(good1)
     good2 = tmp_path / "g2.pdb"; _make_two_chain_pdb(good2)
     bad = tmp_path / "b.cif"; bad.write_text("# minimal cif: no extractable binder chain\n")

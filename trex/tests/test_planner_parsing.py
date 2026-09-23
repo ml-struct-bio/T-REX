@@ -1,11 +1,4 @@
-"""Unit tests for Planner JSON parsing + validation + legacy coercion.
-
-Load-bearing because every Planner response goes through these — and the
-v7 plan thesis relies on JSON-emitting LLMs whose outputs aren't always
-schema-perfect. The defensive coercion (`_coerce_legacy_shape`) is the
-main thing that prevents a one-character LLM glitch from killing the
-tick.
-"""
+"""Test Planner JSON validation, parsing, and coercion of legacy response shapes."""
 
 from __future__ import annotations
 
@@ -69,7 +62,7 @@ def test_planner_allows_evidence_tldr_alias_citations():
 
 
 def test_hypothesis_outcomes_tldr_surfaces_resolved_status():
-    """#6: contradicted/retired/supported hypotheses are surfaced prominently;
+    """Contradicted/retired/supported hypotheses are surfaced prominently;
     active ones are not, and an empty input yields no block."""
     out = _hypothesis_outcomes_tldr([
         {"hypothesis_id": "h1", "status": "contradicted",
@@ -86,14 +79,8 @@ def test_hypothesis_outcomes_tldr_surfaces_resolved_status():
 from trex.schemas import EvidenceSummary, LLMHealthSummary, RouteHealthSummary
 
 
-# ---------------------------------------------------------------------------
-# _coerce_legacy_shape — defensive coercions per Plan §10.7
-# ---------------------------------------------------------------------------
-
-
 def test_coerce_strips_lingering_missing_candidate_requests():
-    """§22.8.5 MCR removal: old prompts / legacy LLM traces that still emit
-    `missing_candidate_requests` must be silently stripped, not failed."""
+    """Discard deprecated optional fields from older responses."""
     obj = {
         "abstain": False, "confidence": 0.7, "cards": [],
         "rationale": "x", "missing_candidate_requests": [{"requested_family": "x"}],
@@ -444,7 +431,7 @@ def test_validate_rejects_confidence_out_of_range():
 
 
 def test_validate_post_mcr_no_required_field():
-    """§22.8.5: `missing_candidate_requests` is not in required anymore."""
+    """Deprecated optional fields are not required."""
     obj = {
         "abstain": False, "confidence": 0.7, "rationale": "x",
         "cards": [_valid_card()],
@@ -573,11 +560,6 @@ def test_repair_schema_drift_does_not_accept_unsupported_science_axis():
     assert "bad_axis" in why
 
 
-# ---------------------------------------------------------------------------
-# build_evidence_for_prompt — §22.8.5 KEEP_ALWAYS fix
-# ---------------------------------------------------------------------------
-
-
 def _empty_evidence() -> EvidenceSummary:
     return EvidenceSummary(
         tick_id="t1", target_id="t", target_class="c", schema_version="v",
@@ -597,8 +579,7 @@ def _empty_evidence() -> EvidenceSummary:
 
 
 def test_keep_always_method_health_even_when_empty():
-    """§22.8.5 fix: method_health={} must survive so LLM sees the empty
-    family map and can reason about 'attempts=0' families to explore."""
+    """Preserve an empty family map in the prompt evidence."""
     ev = _empty_evidence()
     d = build_evidence_for_prompt(ev)
     assert "method_health" in d
@@ -709,9 +690,6 @@ def test_route_values_are_compacted_for_prompt():
     assert "strategy_key" not in row
 
 
-
-
-
 def test_parent_bound_route_rows_precede_family_rollups_in_prompt_view():
     ev0 = _empty_evidence()
     route_values = [
@@ -793,7 +771,6 @@ def test_route_values_prompt_prioritizes_gpu_recent_marginal_value_over_stale_li
     assert view["route_values"][1]["value_rate_for_ranking"] == 0.0
 
 
-
 def test_route_values_prompt_does_not_let_stale_collapse_status_hide_current_su_value():
     ev = _empty_evidence()
     ev.route_values.extend([
@@ -822,8 +799,6 @@ def test_route_values_prompt_does_not_let_stale_collapse_status_hide_current_su_
     assert view["route_values"][0]["family"] == "complexa_beam"
     assert view["route_values"][0]["marginal_status"] == "productive"
     assert view["route_values"][1]["marginal_status"] == "dry_duplicate"
-
-
 
 
 def test_route_values_prompt_exposes_medium_recent_without_promoting_over_short_recent():
@@ -965,7 +940,6 @@ def test_route_values_prompt_keeps_lifetime_memory_out_of_ranking_rate():
     assert row["lifetime_su_per_route_gpu_h"] == 2.5
 
 
-
 def test_evidence_ref_validator_accepts_compact_namespace_refs():
     allowed = {"route_values", "selector_context", "method_health", "state_label"}
     assert _evidence_ref_allowed("route_values::complexa_mcts", allowed)
@@ -990,7 +964,6 @@ def test_evidence_ref_validator_accepts_scalar_value_refs():
     assert _evidence_ref_allowed("run_SU=0", allowed)
     assert _evidence_ref_allowed("route_replay_v7r017_00_complexa_fk_steering", allowed)
     assert _evidence_ref_allowed("route_value_replay", allowed)
-
 
 
 def test_allowed_refs_include_compact_route_ids_and_tick_aliases():
@@ -1021,13 +994,8 @@ def test_allowed_refs_include_compact_route_ids_and_tick_aliases():
     assert "rid_fail" in allowed
 
 
-# ---- llm-001 (2026-06-18): ttl_ticks must never crash the tick ----
-
-
 def test_materialize_cards_coerces_bad_ttl_ticks_without_crashing():
-    """A non-numeric or out-of-range ttl_ticks must be coerced+clamped, not raise.
-    Before the fix int("soon") raised, killing the whole planning tick (the
-    _materialize_cards call is outside call_planner's try → ~60s GPU idle)."""
+    """Normalize invalid ttl_ticks without interrupting hypothesis creation."""
     for bad, expected in [
         ("soon", 10),     # non-numeric → default 10
         ("3.5", 3),       # numeric string → int
@@ -1045,9 +1013,6 @@ def test_materialize_cards_coerces_bad_ttl_ticks_without_crashing():
 def test_materialize_cards_missing_ttl_ticks_defaults_to_10():
     cards = _materialize_cards({"cards": [_valid_card()]}, target_id="t1", tick_id=7)
     assert cards[0].ttl_ticks == 10
-
-
-# ---- llm-003 (2026-06-18): cards filtered to available families ----
 
 
 def test_filter_cards_to_available_drops_and_trims():

@@ -410,9 +410,7 @@ def test_live_tick_records_bounded_tm08_fine_diversity_signal(tmp_path: Path):
 
 def test_live_tick_emits_launches_when_planner_cards_exist(tmp_path: Path):
     arc = Archive(tmp_path / "arc2")
-    # fix20 #2: parent-PDB precondition gates `proteinmpnn_redesign`.
-    # Seed at least one ResultRecord with a usable pdb_path so the
-    # feasibility check passes and the MPNN candidate gets emitted.
+    # Provide the parent structure required by the redesign candidate.
     pdb_seed = tmp_path / "seed.pdb"
     pdb_seed.write_text("ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\n")
     for i in range(4):
@@ -509,7 +507,6 @@ def test_live_tick_lifecycle_uses_baseline_result_id_for_denovo_candidate(tmp_pa
     assert "supported" in statuses
     assert summary["lifecycle_updates"]
     assert summary["lifecycle_updates"][0]["hypothesis_id"] == "h_denovo"
-
 
 
 def test_live_tick_retires_expired_descendant_free_hypothesis_before_planner(tmp_path: Path):
@@ -708,7 +705,7 @@ def test_new_su_resets_dry_timer_even_with_inflight_gpu_h(tmp_path: Path):
             pLDDT=95.0, iPAE=0.15, scRMSD=0.8,
             family="structure_refilter",
         ),
-        artifacts={"pdb_path": str(pdb)},
+        artifacts={"pdb_path": str(pdb), "binder_chain": "A"},
         bins={"refilter_role": CANONICAL_SCORE_CONVERSION, "refilter_source": "src0"},
     ))
 
@@ -784,11 +781,7 @@ def test_hwm_delta_resets_dry_timer_for_late_observed_old_tick_su(tmp_path: Path
 
 
 def test_canonical_chain_new_cluster_su_resets_dry_timer(tmp_path: Path):
-    """Dry-timer fix (2026-06-12): a canonical conversion that mints a NEW
-    Foldseek cluster IS real structural progress and MUST reset the dry timer.
-    Diagnostic-generator targets (BindCraft/BoltzGen/MPNN) earn 100% of their SU
-    this way; excluding it zeroed the high-water mark forever and forced premature
-    deep_stall on every dry window (over-correction, now fixed)."""
+    """A new strict cluster from standardized evaluation resets the no-progress timer."""
     arc = Archive(tmp_path / "arc_dry_timer_new")
     arc.append(_result("g1", parent_ids=["c_gen"], pLDDT=None, iPAE=None,
                        scRMSD=None, family="bindcraft"))

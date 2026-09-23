@@ -1,11 +1,4 @@
-"""Prefetch dispatch queue (2026-05-28).
-
-The controller now dispatches a freed GPU slot INSTANTLY from a primed
-candidate queue (`_dispatch_pending_to_free_slots`), then refills the queue via
-run_live_tick — so the freed GPU runs the dequeued worker in the background
-during planning instead of idling ~30s for the plan cycle. These tests lock the
-queue-dispatch logic with mocked slots / dispatch (no real subprocesses).
-"""
+"""Test queue dispatch and replenishment with mocked worker slots."""
 
 from __future__ import annotations
 
@@ -46,7 +39,6 @@ class _Cand:
 def _ok_dispatch(cand, *, gpu_id, **kw):
     # (proc, out_dir, parent_pdb_str, parent_result_id)
     return (object(), f"/out/{gpu_id}", "parent.pdb", "r_parent")
-
 
 
 def _evidence(state: str = "stalled") -> EvidenceSummary:
@@ -220,7 +212,6 @@ def test_repeated_support_dispatch_cap_matches_selector_guard(monkeypatch):
     assert _high_cost_dispatch_cap(dry_duplicate, "bindcraft") == 2
 
 
-
 def test_dispatch_prioritizes_current_route_value_over_stale_lifetime_memory():
     pool = [_Slot("1")]
     pending = ["old_mcts", "fresh_bc"]
@@ -267,8 +258,6 @@ def test_dispatch_prioritizes_current_route_value_over_stale_lifetime_memory():
     assert n == 1
     assert pool[0].cand.candidate_id == "fresh_bc"
     assert pending == ["old_mcts"]
-
-
 
 
 def test_dispatch_prioritizes_newer_supervisor_candidate_over_old_cross_family_escape():
@@ -375,10 +364,7 @@ def test_busy_slots_untouched_and_empty_queue_is_noop():
 
 
 def test_transient_dispatch_failure_requeued_for_retry():
-    """review #7 (2026-05-31): a transient dispatch miss (e.g. parent PDB not yet
-    flushed) must be RE-QUEUED for a later round, not dropped permanently — the
-    candidate was already marked launched/seen at queue time, so a drop loses its
-    canonical scoring forever. With dispatch_retries provided, it returns to pending."""
+    """Requeue transient dispatch failures within the retry limit."""
     pool = [_Slot("1")]
     pending = ["c1"]
     retries: dict[str, int] = {}

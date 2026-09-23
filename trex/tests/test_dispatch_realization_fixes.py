@@ -1,4 +1,4 @@
-"""Regression tests for v7_3 dispatch-realization fixes."""
+"""Regression tests for selection-to-dispatch accounting."""
 
 from __future__ import annotations
 
@@ -132,10 +132,6 @@ def test_unselected_proposals_are_not_reported_as_under_started() -> None:
     assert summary["under_started_families"] == []
 
 
-
-
-
-
 def test_dispatch_realization_uses_dispatch_metadata_when_action_missing():
     launch = _launch("cand_missing_action", "explore")
     dispatch = DispatchRecord(
@@ -156,8 +152,6 @@ def test_dispatch_realization_uses_dispatch_metadata_when_action_missing():
 
     exec_summary = _execution_realization_summary([], [launch], [dispatch], [])
     assert exec_summary["by_family"]["bindcraft"]["started"] == 1
-
-
 
 
 def test_route_health_treats_high_cost_defer_as_pending_not_terminal():

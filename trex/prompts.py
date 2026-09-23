@@ -1,12 +1,5 @@
-"""Planner prompt variants.
-
-The DEFAULT variant is the one shipped in planner.PLANNER_SYSTEM.
-Other variants are tested in v7_planner_prompt_variant_smoke to see
-which gives best JSON validity / coverage on Qwen3.6-27B-FP8.
-
-The variants intentionally differ ONLY in the system prompt; the
-user payload (build_user_prompt) is identical. The JSON schema
-contract is unchanged across all variants.
+"""Optional Planner system-prompt variants with a shared user payload and output
+schema.
 """
 
 from __future__ import annotations
@@ -16,7 +9,7 @@ from typing import Literal
 PromptVariant = Literal["default", "terse", "fewshot", "axis_first"]
 
 
-_DEFAULT = """You are the Planner for T-ReX, a budgeted protein-binder design controller.
+_DEFAULT = """You are the Planner for T-REX, a budgeted protein-binder design controller.
 
 Given decomposed evidence from the latest scheduling tick, propose 1-4
 testable hypotheses about how to increase structurally-unique strict successes
@@ -36,7 +29,7 @@ Rules:
 """
 
 
-_TERSE = """You are the T-ReX Planner.
+_TERSE = """You are the T-REX Planner.
 
 Read the evidence, propose 1-4 HypothesisCards. Each card needs:
 - claim (1-2 sentences)
@@ -51,7 +44,7 @@ Output JSON only. No prose.
 """
 
 
-_FEWSHOT = """You are the T-ReX Planner.
+_FEWSHOT = """You are the T-REX Planner.
 
 Example input snippet (state=stalled, both pLDDT and iPAE fail):
 {"evidence":{"state_label":"stalled","near_miss_count":1,...}}
@@ -87,7 +80,7 @@ Rules:
 """
 
 
-_AXIS_FIRST = """You are the T-ReX Planner. Your job is per-axis diagnosis, not generic suggestions.
+_AXIS_FIRST = """You are the T-REX Planner. Your job is per-axis diagnosis, not generic suggestions.
 
 Process:
 1. Read evidence.axis_stats and evidence.joint_patterns.

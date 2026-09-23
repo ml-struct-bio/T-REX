@@ -1,4 +1,4 @@
-"""Top-level T-ReX command-line interface."""
+"""Top-level T-REX command-line interface."""
 
 from __future__ import annotations
 
@@ -7,14 +7,16 @@ import sys
 
 from .campaign.cli import add_campaign_parser
 from .campaign.config import ConfigError
+from .public_cli import add_public_parsers
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="trex",
-        description="Configure, run, and inspect T-ReX binder-design campaigns.",
+        description="Configure, run, and inspect T-REX binder-design campaigns.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+    add_public_parsers(subparsers)
     add_campaign_parser(subparsers)
     return parser
 

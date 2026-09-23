@@ -22,23 +22,10 @@ class ParserContext:
     runtime_bucket_id: str
     candidate_id: str
     parent_ids: list[str]  # typically [candidate_id] + any scaffold result_ids
-    method_family: str = ""  # B-009 fix (2026-05-26): Complexa records need
-    # to carry the actual algorithm used (complexa_mcts, complexa_fk_steering,
-    # etc.) — previously parser defaulted to "complexa_beam" which biased the
-    # LLM's perception of which algorithms had been tried. Empty default kept
-    # for backward compatibility with bindcraft parser (hardcodes its family).
-    tick_id: str = ""  # C-2 fix (2026-05-26): ResultRecord.tick_id was left
-    # None because parsers had no round context. EvidenceReducer recipe-recency
-    # ordering and "examples" sort key both read r.tick_id and silently fell
-    # back to -1 for None, so the LLM saw stale evidence in arbitrary order.
-    parent_pdb_path: str = ""  # HIGH 2 fix (2026-05-26): MPNN parser carries
-    # the parent backbone path through artifacts["pdb_path"] so chained AF2
-    # refilter can refold the redesigned sequence onto it. Also useful for
-    # other chain targets.
-    parent_result_id: str = ""  # MEDIUM 1 fix (2026-05-26): preserve originating
-    # ResultRecord.result_id across chained stages so lineage attribution
-    # (recipe / method health) survives multi-stage Complexa→MPNN→refilter
-    # workflows.
+    method_family: str = ""  # Family of the spawning candidate.
+    tick_id: str = ""  # Planning-cycle identifier for evidence recency.
+    parent_pdb_path: str = ""  # Input parent backbone for chained jobs.
+    parent_result_id: str = ""  # Parent result identifier for lineage attribution.
     target_chains_csv: str = ""
     binder_chain: str = ""
     refilter_role: str = ""

@@ -23,7 +23,7 @@ QUOTA_REALIZATIONS = (
 
 def controller_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="T-ReX asynchronous closed-loop controller"
+        description="T-REX asynchronous closed-loop controller"
     )
     parser.add_argument("--archive-root", type=Path, required=True)
     parser.add_argument(

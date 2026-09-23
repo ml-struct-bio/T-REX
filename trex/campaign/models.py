@@ -81,7 +81,7 @@ class MemoryConfig:
 
 @dataclass(frozen=True)
 class BackendPaths:
-    """Explicit paths formerly supplied only through ``TREX_*`` variables."""
+    """Explicit backend and model paths supplied through campaign configuration or TREX_* variables."""
 
     repo_root: Path | None = None
     external_root: Path | None = None

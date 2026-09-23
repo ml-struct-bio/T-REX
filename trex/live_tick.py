@@ -1,18 +1,7 @@
-"""Live tick: end-to-end T-ReX tick with archive persistence + hypothesis lifecycle.
+"""Run a planning cycle and append its evidence, hypotheses, candidates, and decisions.
 
-Differs from `shadow_tick` in that:
-  - It reads `EvidenceSummary` ingredients from a real Archive (not
-    synthetic in-memory cases).
-  - It WRITES every produced record (EvidenceSummary, HypothesisCard,
-    ActionCandidate, LLMCallRecord, SupervisorDecision, LaunchDecision)
-    back to the archive.
-  - It advances `HypothesisCard.status` based on any descendants
-    accumulated since the card was created.
-
-Does NOT actually launch SLURM jobs. The LaunchDecisions emitted are the
-contract that an outer launcher (Phase 5) translates into real worker
-submissions. Today this module is the "what to launch" producer, not
-the launcher itself.
+Also update hypothesis status from accumulated outcomes. Worker dispatch is handled
+separately by the controller.
 """
 
 from __future__ import annotations
@@ -25,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .archive import Archive
+from .output_identity import prepare_archive_results
 from .cross_campaign_memory import cross_campaign_memory_prompt_audit
 from .candidate_builder import WARMSTART_FAMILIES
 from .capability_registry import CapabilityRegistry, default_registry
@@ -278,11 +268,9 @@ def _llm_call_record(
     usage: dict,
     prompt_audit: dict[str, Any] | None = None,
 ) -> LLMCallRecord:
-    # Bug F (feedback): hash the PROMPT we sent (system + user payload),
-    # not the LLM's response. Reproducibility audit needs to detect
-    # "same prompt was sent twice", not "same response came back".
+    # Hash the sent system and user prompts for reproducibility.
     prompt_hash = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()[:16]
-    # The T-ReX LLM adapter normalizes provider usage as input_tokens/output_tokens
+    # The T-REX LLM adapter normalizes provider usage as input_tokens/output_tokens
     # (prefill/generation), while some test fakes and OpenAI raw payloads use
     # prompt_tokens/completion_tokens. Accept both so appendix token accounting
     # does not silently zero out on vLLM/OpenAI-compatible clients.
@@ -444,22 +432,11 @@ def _supervisor_decision_record(
 
 
 def _decision_signature(ev: EvidenceSummary) -> tuple:
-    """Decision-relevant fingerprint of an EvidenceSummary. Two ticks with the
-    same signature would produce the same Planner/Supervisor inputs, so the LLM
-    calls can be skipped and the prior decision reused.
+    """Fingerprint decision-relevant evidence for optional LLM-call reuse.
 
-    Bug fix (2026-05-28): the signature now includes the collapse / rescue /
-    deadline signals the Planner & Supervisor prompts actually branch on —
-    near_miss_count, top_bin_share, duplicate_fraction, and a bucketed
-    remaining_wall_h. Previously these were omitted, so a skip could reuse a
-    stale plan even when duplicate_fraction climbed to 1.0 (the mode-collapse
-    the planner is supposed to diversify away from), near-misses appeared (a
-    rescue opportunity), or the run crossed a wall-clock deadline band (the
-    exploit-near-deadline bias). top_bin_share / duplicate_fraction are
-    bucketed to 0.1 (ignore sampling noise, catch real collapse) and
-    remaining_wall_h into 3-h bands; truly monotonic, decision-irrelevant
-    fields (cumulative gpu_h, raw elapsed_wall_h) are still excluded so the
-    skip still fires on genuinely-unchanged evidence."""
+    Include recent productivity, near misses, duplication, and remaining-time bands.
+    Bucket noisy values while excluding irrelevant monotonic counters.
+    """
     mh = ev.method_health or {}
     fam = tuple(sorted(
         (
@@ -468,12 +445,7 @@ def _decision_signature(ev: EvidenceSummary) -> tuple:
             mh[k].chained_strict_yield_su,
             round((mh[k].su_per_gpu_h or 0.0), 3),
             round((mh[k].chained_su_per_gpu_h or 0.0), 3),
-            # F1 fix (2026-05-31): include the RECENT-window signals the prompt
-            # actually ranks on (su_per_gpu_h_recent, near_miss_yield_recent, and
-            # F7 the chained-recent diagnostic-lane fields). Lifetime rates alone
-            # let a skip reuse a stale plan after a family's RECENT rate dried to
-            # ~0 — the exact pivot the prompt is supposed to make. (Only consulted
-            # when ENABLE_EVIDENCE_SKIP=1.)
+            # Recent route evidence must invalidate reuse when productivity changes.
             round((mh[k].su_per_gpu_h_recent or 0.0), 3),
             mh[k].near_miss_yield_recent,
             round((mh[k].chained_su_per_gpu_h_recent or 0.0), 3),
@@ -596,9 +568,7 @@ def _decision_signature(ev: EvidenceSummary) -> tuple:
     return (
         ev.state_label,
         ev.run_su_count,
-        # F1 fix (2026-05-31): the MARGINAL run_su_count_delta + top-level recent
-        # rate are decision-relevant (the prompt's exploit/stall signals) and
-        # were omitted, so a skip could miss a fresh stall/recovery.
+        # Include new-SU and recent-rate signals in the reuse fingerprint.
         ev.run_su_count_delta,
         _b1(ev.su_per_gpu_h_recent),
         ev.global_new_strict,
@@ -1125,8 +1095,7 @@ def _diagnostic_chain_backlog(
         elif c.candidate_id in dispatched_ids:
             dispatched_chain += 1
             e["dispatched_chain_candidates"] += 1
-            # Backward-compatible alias for dashboards/tests that still read
-            # "launched"; semantically this now means worker-dispatched.
+            # The compatibility key "launched" counts confirmed worker dispatches.
             e["launched_chain_candidates"] += 1
         elif c.candidate_id in selected_ids:
             queued_chain += 1
@@ -1228,16 +1197,11 @@ def _charged_gpu_h_recent_for_window(
     window_start_count: int,
     charged_gpu_h_total: float,
 ) -> float:
-    """Charged GPU-h over the SU window's wall-span (FIX5, v7_3).
+    """Compute charged GPU-hours over the SU window using archived tick boundaries.
 
-    = charged_gpu_h_total minus the charged total at the last prior tick whose
-    cumulative completed_children is at/below the window's first record. The
-    baseline is TICK-aligned, so the span is >= the record-exact window and the
-    rate is conservative (never inflated). Robust to empty prior_evs (→ total,
-    early run), None completed_children (skipped, not break-causing), None
-    charged_total on the baseline tick (falls back to the last non-None), and a
-    window_start_count of 0 (early run → total). Never negative (charged_total is
-    monotonic, and the max(0.,…) guards anyway)."""
+    Use the latest available preceding boundary and clamp the difference to zero. The
+    tick-aligned span can exceed the exact record window.
+    """
     baseline_charged: float | None = None
     for e in prior_evs:  # chronological (oldest→newest)
         cc = getattr(e, "completed_children", None)
@@ -1270,7 +1234,7 @@ def run_live_tick(
     pending_family_load: dict[str, Any] | None = None,
     evidence_only: bool = False,
 ) -> dict[str, Any]:
-    """Run one full T-ReX tick on a real archive.
+    """Run one full T-REX tick on a real archive.
 
     Returns a JSON-serializable summary. Side effect: appends records to
     the archive. Does NOT actually launch SLURM jobs.
@@ -1300,7 +1264,7 @@ def run_live_tick(
 
     # ----- 1. Load one read-only pre-tick archive snapshot ----------------
     archive_snapshot = load_tick_archive_snapshot(archive, target.target_id)
-    all_results = list(archive_snapshot.target_results)
+    all_results = prepare_archive_results(archive_snapshot.target_results, archive.root)
     all_actions = list(archive_snapshot.actions)
     all_hypotheses = list(archive_snapshot.latest_target_hypotheses)
     spawning = dict(archive_snapshot.spawning_action_by_result_id)
@@ -1684,16 +1648,13 @@ def run_live_tick(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    """Operator CLI: run one live tick on an existing archive.
-
-    Used by `docs/v7_observe_mode_runbook.md` step 3. Reads
-    target_constraint from a JSON file; emits LaunchDecisions to the
-    archive; does NOT submit SLURM workers (the §22.1 daemon does that).
+    """Run one planning cycle on an existing archive and record decisions without
+    dispatching workers.
     """
     import argparse
 
     p = argparse.ArgumentParser(
-        description="Run one live T-ReX tick on an existing archive.",
+        description="Run one live T-REX tick on an existing archive.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--archive-root", type=Path, required=True,
