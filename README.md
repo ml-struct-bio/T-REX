@@ -71,12 +71,17 @@ Then create the CD45 campaign YAML. This command records the four choices that
 usually change between campaigns:
 
 ```bash
-trex init campaign.yaml \
+trex init campaign_cd45.yaml \
   --target cd45 \
   --gpus 4 \
   --hours 48 \
   --output /absolute/path/to/outputs
 ```
+
+The first argument is the YAML file to create. Its name and location are your
+choice; target-specific names such as `campaign_cd45.yaml` and
+`campaign_il7ra.yaml` make multiple campaigns easier to distinguish. Pass that
+same path to `trex check`, `trex submit` or `trex design` below.
 
 `--gpus` is the total number requested on one node. GPU 0 serves the local LLM;
 the remaining GPUs are workers, so `2`, `4` and `8` provide one, three and seven
@@ -95,7 +100,7 @@ The three configuration files have distinct roles:
 
 | File | Role |
 | --- | --- |
-| `campaign.yaml` | Target, GPU workers, duration, output, policy and enabled design families |
+| `campaign_<target>.yaml` | Target, GPU workers, duration, output, policy and enabled design families |
 | `.env` | Installed controller/backend executables and site-specific runtime settings |
 | `.env.assets` | Verified checkpoint and target paths written by the asset manager |
 
@@ -105,33 +110,33 @@ Validate target identity, model files, enabled backends and pinned backend
 revisions without submitting a job:
 
 ```bash
-trex check campaign.yaml
+trex check campaign_cd45.yaml
 ```
 
 Submit from a Slurm login/submission node:
 
 ```bash
-trex submit campaign.yaml
+trex submit campaign_cd45.yaml
 ```
 
 If your cluster requires an explicit project account or GPU partition:
 
 ```bash
-trex submit campaign.yaml \
+trex submit campaign_cd45.yaml \
   --account YOUR_ACCOUNT \
   --partition YOUR_GPU_PARTITION
 ```
 
 `--account` is the cluster project charged for compute and `--partition` is its
 GPU queue. Their valid names come from your cluster. The command derives the
-Slurm GPU/time request from `campaign.yaml`, repeats validation and invokes
+Slurm GPU/time request from the campaign YAML, repeats validation and invokes
 [slurm/T-REX.slurm](slurm/T-REX.slurm); do not run the Slurm file separately.
 
 When you already have a GPU allocation and a compatible OpenAI-style LLM server,
 set its endpoint in the YAML and run:
 
 ```bash
-trex design campaign.yaml
+trex design campaign_cd45.yaml
 ```
 
 `trex design` runs in the current allocation. `trex submit` obtains a new Slurm

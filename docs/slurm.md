@@ -16,12 +16,17 @@ Create a campaign by specifying the target, total GPUs, controller duration and
 output directory:
 
 ```bash
-trex init campaign.yaml \
+trex init campaign_cd45.yaml \
   --target cd45 \
   --gpus 4 \
   --hours 48 \
   --output /absolute/path/to/outputs
 ```
+
+The first argument is the output path for the generated YAML and may use any
+name. Use a target-specific name such as `campaign_cd45.yaml`, then pass the
+same path to the later commands. Separate files such as `campaign_il7ra.yaml`
+can coexist in one checkout.
 
 GPU 0 is reserved for the local Qwen server. The other GPUs are campaign
 workers. Thus, `--gpus 2`, `4` and `8` create one, three and seven workers. The
@@ -41,7 +46,7 @@ the [custom-target guide](../examples/custom_target/README.md).
 Check the complete resolved input without submitting a job:
 
 ```bash
-trex check campaign.yaml
+trex check campaign_cd45.yaml
 ```
 
 This verifies target identity and hashes, required checkpoint manifests, enabled
@@ -52,13 +57,13 @@ file.
 Submit using your cluster's default account and partition:
 
 ```bash
-trex submit campaign.yaml
+trex submit campaign_cd45.yaml
 ```
 
 If your site requires scheduler identifiers, pass them explicitly:
 
 ```bash
-trex submit campaign.yaml \
+trex submit campaign_cd45.yaml \
   --account YOUR_ACCOUNT \
   --partition YOUR_GPU_PARTITION
 ```
@@ -109,7 +114,7 @@ job. Check `dispatch_records.jsonl` to confirm molecular work started.
 Keep the original YAML and submit the exact existing archive:
 
 ```bash
-trex submit campaign.yaml --resume /absolute/path/to/existing/archive
+trex submit campaign_cd45.yaml --resume /absolute/path/to/existing/archive
 ```
 
 Resume appends records and includes elapsed time already present in the archive;
@@ -122,11 +127,11 @@ When you manage the GPU allocation and compatible OpenAI-style LLM server
 separately, set `llm.base_url` in the YAML and run:
 
 ```bash
-trex design campaign.yaml
+trex design campaign_cd45.yaml
 ```
 
 This command preflights and starts the controller in the current allocation. It
-does not call Slurm or start vLLM. Use `trex design campaign.yaml --dry-run` for
+does not call Slurm or start vLLM. Use `trex design campaign_cd45.yaml --dry-run` for
 a read-only resolution check.
 
 ## Compatibility interface
