@@ -3,14 +3,14 @@ message: "If you use T-REX, please cite this software and the accompanying manus
 title: "T-REX: evidence-guided adaptive allocation improves structure-unique throughput in de novo binder design"
 type: software
 version: 0.1.2
-date-released: 2026-09-20
+date-released: 2026-09-22
 authors:
   - family-names: Jeon
     given-names: Minkyu
   - family-names: Song
     given-names: Jinyeop
-  - family-names: Gore
-    given-names: Jeff
+  - family-names: Kim
+    given-names: Jina
   - family-names: Zhong
     given-names: Ellen D.
 repository-code: "https://github.com/ml-struct-bio/T-REX"
