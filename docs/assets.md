@@ -52,7 +52,7 @@ The release size and SHA256 are pinned in
 
 ```bash
 python -m pip install -e '.[assets]'
-TREX_ASSET_DRIVE_URL='https://drive.google.com/file/d/1orGqGyNFJpxUdfypbqFfs6W0XvlDJDwG/view?usp=sharing'
+TREX_ASSET_DRIVE_URL='https://drive.google.com/file/d/1QkXn7AoHD-pasiHoIx5o08TlTrWjrqKx/view?usp=share_link'
 python scripts/manage_assets.py fetch --root ../T-REX-assets \
   --drive-url "$TREX_ASSET_DRIVE_URL"
 ```

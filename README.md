@@ -42,7 +42,7 @@ structures (about 52 GB; see [assets](docs/assets.md) for component downloads):
 
 ```bash
 python scripts/manage_assets.py fetch --root ../T-REX-assets \
-  --drive-url 'https://drive.google.com/file/d/1orGqGyNFJpxUdfypbqFfs6W0XvlDJDwG/view?usp=sharing'
+  --drive-url 'https://drive.google.com/file/d/1QkXn7AoHD-pasiHoIx5o08TlTrWjrqKx/view?usp=share_link'
 python scripts/manage_assets.py verify --root ../T-REX-assets
 python scripts/manage_assets.py configure \
   --root ../T-REX-assets \
