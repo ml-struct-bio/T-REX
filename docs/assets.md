@@ -33,12 +33,10 @@ python scripts/manage_assets.py fetch --root ../T-REX-assets \
 | `documentation` | <0.001 GB | Setup, version records, citations, notices, compatible environment locks and required patches |
 | `boltzgen` | 8.41 GB | Five cached checkpoints, molecule dictionary and fixed HF cache references |
 | `qwen` | 30.89 GB | Exact Qwen3.6-27B-FP8 model snapshot |
-| `targets` | 0.002 GB | Nine study structures, preserving the registered crops, chains and residue numbering |
+| `targets` | 0.002 GB | Seven study structures, preserving the registered crops, chains and residue numbering |
 
-The target bundle contains BetV1, CbAgo, CD45, HER2, SC2RBD, IL7RA, PD-L1,
-TNFalpha and TrkA. The `her2aav` target label refers to the human HER2
-structure. These files cover all seven primary benchmark targets and the two
-SI pilot targets.
+The target bundle contains BetV1, CbAgo, CD45, HER2, SC2RBD, IL7RA and PD-L1. The `her2aav` target label refers to the human HER2
+structure. These files cover all seven primary benchmark targets.
 
 The BoltzGen collection includes the model cache and the
 optional affinity checkpoint; not every workflow uses every cached model.
