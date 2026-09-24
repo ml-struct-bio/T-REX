@@ -19,7 +19,8 @@ BindCraft uses a separate Python 3.10.20 environment.
 ```bash
 git clone https://github.com/ml-struct-bio/T-REX.git
 cd T-REX
-python -m pip install 'uv==0.11.1'
+python -m pip install --user 'uv==0.11.1'
+export PATH="$HOME/.local/bin:$PATH"
 uv venv --python 3.12.13 --seed .venv
 source .venv/bin/activate
 python -m pip install -e '.[assets]'
