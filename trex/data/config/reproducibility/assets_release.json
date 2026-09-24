@@ -4,10 +4,10 @@
   "archive_root": "T-REX-assets",
   "size": 45149560174,
   "sha256": "eb7ba24cb669638c36ab7c3665d69ab9aab2bfa889e19042892cefd2625b3530",
-  "manifest_files": 151,
-  "total_archive_files": 154,
+  "manifest_files": 149,
+  "total_archive_files": 152,
   "compression": "ZIP64 / Deflate, level 1",
   "google_drive_url": "https://drive.google.com/file/d/1orGqGyNFJpxUdfypbqFfs6W0XvlDJDwG/view?usp=sharing",
-  "manifest_sha256": "e0c942a7035567abe3f2628a9ff8442db0a0d15dfa071cd55ea8c8bb7d372bc2",
+  "manifest_sha256": "a84d2d41ec6ea5569f2abf142ca69f7378571e8bb139751eda657a7b73b3a383",
   "release": "0.1.3-publication"
 }

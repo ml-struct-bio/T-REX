@@ -412,7 +412,7 @@ def _resolve_pdb_chains(
 
     Parent PDBs reach the AF2 refilter from heterogeneous sources whose chain
     conventions DIFFER. Prefer the target constraint's chain IDs when a
-    multi-chain target is preserved (TNF-alpha A/B/C + binder D). Otherwise use
+    multi-chain target is preserved. Otherwise use
     residue-count matching only for legacy callers without a target reference.
     All production dispatch paths supply target_pdb and verify exact target
     subunit sequences; unknown or ambiguous roles cannot dispatch.
@@ -1018,14 +1018,11 @@ LENGTHS_PER_TARGET: dict[str, tuple[int, int]] = {
     "26_CbAgo": (70, 160),
     "31_IL7RA": (50, 120),
     "32_PDL1_ALPHA_REPACK": (50, 120),
-    "33_TrkA": (50, 120),
     "36_VEGFA": (50, 140),
-    "38_TNFalpha_REPACK": (50, 120),
     # Historical aliases kept for replay/offline analysis only.
     "27_HER2_AAV": (60, 100),
     "25_CbAgo": (70, 160),
     "02_PDL1": (64, 155),
-    "38_TNFalpha": (50, 120),
 }
 
 

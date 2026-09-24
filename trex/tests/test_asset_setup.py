@@ -262,8 +262,6 @@ def test_real_manifest_is_portable_and_has_expected_components():
         "il7ra",
         "pdl1",
         "sc2rbd",
-        "tnfalpha",
-        "trka",
     }
     root = Path(__file__).resolve().parents[2]
     registry = json.loads((root / "config/targets/registry.json").read_text())[

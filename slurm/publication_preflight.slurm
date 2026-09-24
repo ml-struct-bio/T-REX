@@ -50,7 +50,7 @@ if [[ -n "${TREX_MMSEQS_BIN:-}" ]]; then
   export PATH="$(dirname "${TREX_MMSEQS_BIN}"):${PATH}"
 fi
 
-TARGETS="${TREX_PREFLIGHT_TARGETS:-cd45,betv1,cbago,her2aav,il7ra,pdl1,tnfalpha,trka}"
+TARGETS="${TREX_PREFLIGHT_TARGETS:-cd45,betv1,cbago,her2aav,sc2rbd,pdl1,il7ra}"
 IFS=, read -r -a TARGET_ARRAY <<< "${TARGETS}"
 [[ "${#TARGET_ARRAY[@]}" -gt 0 ]] || {
   echo "[FATAL] TREX_PREFLIGHT_TARGETS is empty" >&2

@@ -50,24 +50,6 @@
       "path": "alpha_proteo_targets/6m0j_cropped.pdb",
       "sha256": "312a33397411a070ca7c8ca440461cb2c14b590d33725407b9c5fe579940e3e1",
       "target_id": "30_SC2RBD"
-    },
-    "tnfalpha": {
-      "bytes": 277379,
-      "chains": {
-        "A": {"max_residue": 157, "min_residue": 12, "n_residues": 146},
-        "B": {"max_residue": 157, "min_residue": 12, "n_residues": 146},
-        "C": {"max_residue": 157, "min_residue": 12, "n_residues": 146}
-      },
-      "path": "alpha_proteo_targets/1tnf_repacked.pdb",
-      "sha256": "031887e6ef8e94d35bcad371fb3e7c156d99481766438080b3d3917188fcd4b0",
-      "target_id": "38_TNFalpha_REPACK"
-    },
-    "trka": {
-      "bytes": 63423,
-      "chains": {"X": {"max_residue": 382, "min_residue": 282, "n_residues": 101}},
-      "path": "alpha_proteo_targets/1www_cropped.pdb",
-      "sha256": "09d486c7368f57009e4f750ff17dc5ce86e03ef42dc9e9d153841bfb9e71f9c7",
-      "target_id": "33_TrkA"
     }
   }
 }

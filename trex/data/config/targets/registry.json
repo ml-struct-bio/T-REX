@@ -35,16 +35,6 @@
       "config": "sc2rbd.json",
       "pdb": "alpha_proteo_targets/6m0j_cropped.pdb",
       "target_id": "30_SC2RBD"
-    },
-    "tnfalpha": {
-      "config": "tnfalpha.json",
-      "pdb": "alpha_proteo_targets/1tnf_repacked.pdb",
-      "target_id": "38_TNFalpha_REPACK"
-    },
-    "trka": {
-      "config": "trka.json",
-      "pdb": "alpha_proteo_targets/1www_cropped.pdb",
-      "target_id": "33_TrkA"
     }
   }
 }

@@ -2019,7 +2019,7 @@ def test_high_cost_recent_near_only_does_not_open_full_cap():
     assert source in {"promoted", "route_value_promoted"}
 
 
-def test_high_cost_tnf_like_no_su_deep_stall_never_opens_full_bindcraft_cap():
+def test_high_cost_backlog_saturated_no_su_deep_stall_never_opens_full_bindcraft_cap():
     import dataclasses
     from trex.selector import high_cost_cap_for_evidence
 

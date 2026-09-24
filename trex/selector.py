@@ -161,7 +161,7 @@ class SelectorConfig:
     # stagnation signals; if Supervisor forgets to rank them, do not let a stale
     # same-root replay fill every slot and silently erase the escape floor.
     realize_cross_family_escape_floor: bool = True
-    # Narrow TNF-style guard: a route-deferred diagnostic generator should not be
+    # Narrow backlog-saturation guard: a route-deferred diagnostic generator should not be
     # revived as a fresh cross-family generation when the same family already has
     # a large unscored diagnostic backlog, enough completed score-conversion
     # probes to show 0 SU, and no pending promising artifacts. In that case the

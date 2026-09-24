@@ -23,8 +23,8 @@ def _write_ca_pdb(path: Path, chain_lengths: dict[str, int]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
-def test_resolve_pdb_chains_preserves_tnf_trimer_target(tmp_path: Path):
-    parent = tmp_path / "tnf_parent.pdb"
+def test_resolve_pdb_chains_preserves_multichain_target(tmp_path: Path):
+    parent = tmp_path / "multichain_parent.pdb"
     _write_ca_pdb(parent, {"A": 5, "B": 5, "C": 5, "D": 3})
 
     target_chains, binder_chain = controller._resolve_pdb_chains(
@@ -37,17 +37,17 @@ def test_resolve_pdb_chains_preserves_tnf_trimer_target(tmp_path: Path):
     assert binder_chain == "D"
 
 
-def test_first_free_chain_avoids_tnf_target_chains():
+def test_first_free_chain_avoids_multichain_target_chains():
     assert controller._first_free_chain_id(("A", "B", "C"), default="B") == "D"
 
 
-def test_boltzgen_yaml_includes_all_tnf_target_chains(tmp_path: Path):
-    target_pdb = tmp_path / "tnf_target.pdb"
+def test_boltzgen_yaml_includes_all_multichain_target_chains(tmp_path: Path):
+    target_pdb = tmp_path / "multichain_target.pdb"
     _write_ca_pdb(target_pdb, {"A": 2, "B": 2, "C": 2})
 
     spec = controller._write_boltzgen_yaml(
         tmp_path,
-        "38_TNFalpha",
+        "TEST_MULTICHAIN",
         str(target_pdb),
         hotspots=["A1", "C2"],
         chain_ids=["A", "B", "C"],
@@ -65,7 +65,7 @@ def test_boltzgen_yaml_includes_all_tnf_target_chains(tmp_path: Path):
 
 
 def test_proteinmpnn_extracts_d_chain_binder_sequence(tmp_path: Path):
-    parent = tmp_path / "tnf_parent.pdb"
+    parent = tmp_path / "multichain_parent.pdb"
     _write_ca_pdb(parent, {"A": 4, "B": 4, "C": 4, "D": 3})
     seq = "AAAA" + ("X" * 20) + "BBBB" + ("X" * 20) + "CCCC" + ("X" * 20) + "DEF"
 
@@ -76,7 +76,7 @@ def _result_with_pdb(path: Path, binder_chain: str) -> ResultRecord:
     return ResultRecord(
         result_id="r1",
         parent_ids=[],
-        target_id="38_TNFalpha",
+        target_id="TEST_MULTICHAIN",
         backend_family="structure_refilter",
         runtime_bucket_id="rb",
         metrics={"pLDDT": 91.0, "iPAE": 0.2, "binder_scRMSD": 1.0},
@@ -90,7 +90,7 @@ def _result_with_pdb(path: Path, binder_chain: str) -> ResultRecord:
 
 
 def test_foldseek_chain_extraction_uses_record_binder_chain_d(tmp_path: Path):
-    parent = tmp_path / "tnf_scored.pdb"
+    parent = tmp_path / "multichain_scored.pdb"
     _write_ca_pdb(parent, {"A": 4, "B": 4, "C": 4, "D": 3})
     rec = _result_with_pdb(parent, "D")
     out = tmp_path / "binder_only.pdb"
@@ -106,7 +106,7 @@ def test_foldseek_chain_extraction_uses_record_binder_chain_d(tmp_path: Path):
 
 
 def test_sequence_dedup_uses_record_binder_chain_d(tmp_path: Path):
-    parent = tmp_path / "tnf_scored.pdb"
+    parent = tmp_path / "multichain_scored.pdb"
     _write_ca_pdb(parent, {"A": 4, "B": 4, "C": 4, "D": 3})
     rec = _result_with_pdb(parent, "D")
 
