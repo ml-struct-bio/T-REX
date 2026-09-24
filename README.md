@@ -92,8 +92,7 @@ admitting a backend job.
 
 Registered targets resolve their constraint JSON and PDB automatically from the
 repository and `.env.assets`. The study labels are `cd45`, `betv1`, `cbago`,
-`her2aav`, `sc2rbd`, `pdl1` and `il7ra` (main benchmark), plus `tnfalpha` and
-`trka` (SI pilots). For an unregistered target, see the
+`her2aav`, `sc2rbd`, `pdl1` and `il7ra` (main benchmark). For an unregistered target, see the
 [custom-target guide](examples/custom_target/README.md).
 
 The three configuration files have distinct roles:
