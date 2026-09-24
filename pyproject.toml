@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-assets = ["gdown==6.4.0"]
+assets = ["gdown==5.2.2"]
 providers = [
   "anthropic>=0.40",
   "google-genai>=1.0",
