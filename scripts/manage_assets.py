@@ -311,12 +311,12 @@ def fetch_drive(
                 output=str(download),
                 resume=True,
                 use_cookies=False,
-                timeout=(30, 120),
-                retries=3,
             )
         except Exception as exc:
             raise ValueError(
-                "Drive download failed; check public file access, quota and network, then retry"
+                "Drive download failed "
+                f"({type(exc).__name__}: {exc}); check public file access, quota "
+                "and network, then retry"
             ) from exc
         if result is None:
             raise ValueError(

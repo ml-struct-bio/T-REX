@@ -126,7 +126,12 @@ def test_drive_checks_archive_then_members_and_reuses_assets(tmp_path, monkeypat
             tmp_path / "cache",
         )
     assert len(calls) == 1
-    assert calls[0]["resume"] is True and calls[0]["use_cookies"] is False
+    assert calls[0] == {
+        "url": "https://drive.google.com/file/d/example/view",
+        "output": str(tmp_path / "cache" / (sha + ".zip")),
+        "resume": True,
+        "use_cookies": False,
+    }
     assert (root / ENTRY["path"]).read_bytes() == DATA
 
 
@@ -168,7 +173,9 @@ def test_drive_reports_transport_failure_without_extracting(tmp_path, monkeypatc
         raise RuntimeError("quota exceeded")
 
     monkeypatch.setitem(sys.modules, "gdown", types.SimpleNamespace(download=fail))
-    with pytest.raises(ValueError, match="Drive download failed"):
+    with pytest.raises(
+        ValueError, match="Drive download failed \\(RuntimeError: quota exceeded\\)"
+    ):
         assets.fetch_drive(
             tmp_path / "out",
             COMPONENTS,
