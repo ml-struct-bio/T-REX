@@ -32,14 +32,24 @@ run the [CPU archive-analysis example](examples/analysis_demo/README.md).
 
 ## 2. Prepare GPU environments and checkpoints
 
-Follow [installation](docs/installation.md) to create the separate local-LLM,
-Complexa/AF2/ProteinMPNN, BindCraft and BoltzGen environments and install
-Foldseek/MMseqs2. Keep the checkouts, environments and their base Python
-interpreters accessible from compute nodes. The guide includes dependency and
-GPU checks and distinguishes installation profiles from the study inventory.
+First obtain the pinned backend source checkouts. Checkpoint files come from the
+asset bundle below, so skip Git LFS downloads while cloning:
 
-After obtaining the backend checkouts, prepare the pinned checkpoints and target
-structures (about 52 GB; see [assets](docs/assets.md) for component downloads):
+```bash
+mkdir -p external
+export GIT_LFS_SKIP_SMUDGE=1
+git clone https://github.com/NVIDIA-BioNeMo/Proteina-Complexa external/Proteina-Complexa
+git -C external/Proteina-Complexa checkout 5ae24b055d828918296f2aad63616b1f4cc0e491
+git clone https://github.com/martinpacesa/BindCraft external/BindCraft
+git -C external/BindCraft checkout b971db42ba6e091afab63ccb30ae02215150a990
+git -C external/BindCraft apply "$PWD/external/patches/bindcraft-production.patch"
+git clone https://github.com/HannesStark/boltzgen external/BoltzGen
+git -C external/BoltzGen checkout 31d9d9b9c72245b4ed6fe8742d6fbf4e1a3552a0
+unset GIT_LFS_SKIP_SMUDGE
+```
+
+Next, prepare the pinned checkpoints and target structures (about 52 GB; see
+[assets](docs/assets.md) for component downloads):
 
 ```bash
 python scripts/manage_assets.py fetch --root ../T-REX-assets \
@@ -54,10 +64,17 @@ python scripts/manage_assets.py configure \
 ```
 
 `configure` links the verified weights into the backend trees and writes
-`.env.assets` in the repository root. The campaign configuration loads this file
-automatically; keep it and the asset directory in place. It supplies the CD45 PDB at
+`.env.assets` in the repository root. It does not clone or install a backend. The
+campaign configuration loads this file automatically; keep it and the asset
+directory in place. It supplies the CD45 PDB at
 `targets/bindcraft_targets/CD45.pdb`; the matching constraints are already in
 [config/targets/cd45.json](config/targets/cd45.json).
+
+Finally, follow [installation](docs/installation.md) to create the separate
+local-LLM, Complexa/AF2/ProteinMPNN, BindCraft and BoltzGen environments and
+install Foldseek/MMseqs2. Keep the checkouts, environments and their base Python
+interpreters accessible from compute nodes. The guide includes dependency and
+GPU checks and distinguishes installation profiles from the study inventory.
 
 ## 3. Create one campaign configuration
 

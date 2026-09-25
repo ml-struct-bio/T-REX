@@ -45,6 +45,7 @@ From the T-REX repository root, fetch the three pinned backend checkouts:
 
 ```bash
 mkdir -p external
+export GIT_LFS_SKIP_SMUDGE=1
 git clone https://github.com/NVIDIA-BioNeMo/Proteina-Complexa external/Proteina-Complexa
 git -C external/Proteina-Complexa checkout 5ae24b055d828918296f2aad63616b1f4cc0e491
 git clone https://github.com/martinpacesa/BindCraft external/BindCraft
@@ -52,9 +53,13 @@ git -C external/BindCraft checkout b971db42ba6e091afab63ccb30ae02215150a990
 git -C external/BindCraft apply "$PWD/external/patches/bindcraft-production.patch"
 git clone https://github.com/HannesStark/boltzgen external/BoltzGen
 git -C external/BoltzGen checkout 31d9d9b9c72245b4ed6fe8742d6fbf4e1a3552a0
+unset GIT_LFS_SKIP_SMUDGE
 ```
 
-The BindCraft patch sets the executable permissions used in the study.
+The checkpoints are supplied by the asset bundle, so these commands skip
+duplicate Git LFS downloads. The BindCraft patch sets the executable permissions
+used in the study.
+
 Then install each backend in its own environment:
 
 | Backend | Setup and path to configure |
