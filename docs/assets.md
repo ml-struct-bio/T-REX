@@ -1,5 +1,10 @@
 # Checkpoints and target structures
 
+The main [README](../README.md#1-install-t-rex-backends-and-checkpoints)
+downloads, verifies and configures this collection as part of `trex setup`.
+The commands below are component-level alternatives for mirrors, partial
+downloads and audits.
+
 Use the asset manager from a T-REX source checkout with Python 3.10–3.12.
 Upstream downloads use the Python standard library; Google Drive downloads
 use the optional `assets` dependency. The pinned manifest records each

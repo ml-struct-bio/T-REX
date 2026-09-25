@@ -414,11 +414,39 @@ def validate_install(
     checks.append(
         Check(
             "MMseqs2 executable",
-            "ok" if mmseqs else "warn",
-            mmseqs or "not found; sequence diversity will be unavailable",
-            required=False,
+            "ok" if mmseqs else ("fail" if require_backends else "warn"),
+            mmseqs or "not found; set TREX_MMSEQS_BIN or PATH",
+            required=require_backends,
         )
     )
+    if verify_backend_revisions and PRODUCTION_STACK.is_file():
+        tool_stack = json.loads(PRODUCTION_STACK.read_text()).get("components", {})
+        for label, executable, component in (
+            ("Foldseek version", foldseek, "foldseek"),
+            ("MMseqs2 version", mmseqs, "mmseqs2"),
+        ):
+            if not executable:
+                continue
+            expected = str(tool_stack.get(component, {}).get("version", ""))
+            try:
+                observed = subprocess.run(
+                    [executable, "version"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                detail = (observed.stdout or observed.stderr).strip()
+                ok = observed.returncode == 0 and bool(expected) and expected in detail
+            except (OSError, subprocess.SubprocessError) as exc:
+                ok, detail = False, str(exc)
+            checks.append(
+                Check(
+                    label,
+                    "ok" if ok else "fail",
+                    f"expected={expected or '<missing>'} observed={detail or '<unavailable>'}",
+                )
+            )
 
     need_complexa = any(family.startswith("complexa_") for family in families)
     need_af2 = bool({"structure_refilter", "proteinmpnn_redesign"} & families)
@@ -555,6 +583,18 @@ def validate_install(
     path_check("BoltzGen executable", boltzgen_bin, need_boltzgen, "exec")
 
     if require_model:
+        controller_python = _env_path("TREX_CONTROLLER_PYTHON")
+        checks.append(
+            Check(
+                "campaign serving/controller Python",
+                "ok"
+                if controller_python
+                and controller_python.is_file()
+                and os.access(controller_python, os.X_OK)
+                else "fail",
+                str(controller_python) if controller_python else "not configured",
+            )
+        )
         model_path = _env_path("TREX_QWEN_MODEL_PATH")
         model_manifest = _env_path(
             "TREX_MODEL_MANIFEST",

@@ -178,7 +178,10 @@ def main(argv=None):
             ]
         )
         run([uv, "pip", "check", "--python", python])
-        run([python, ROOT / "scripts/check_complexa_env.py", "--repo", repository])
+        run(
+            [python, ROOT / "scripts/check_complexa_env.py", "--repo", repository],
+            cwd=repository,
+        )
         record["status"] = "dependency-and-import-checks-passed"
         marker.write_text(json.dumps(record, indent=2) + "\n")
         print(f"Installed and checked: {python}")

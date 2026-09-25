@@ -16,6 +16,7 @@ from .campaign.environment import applied_environment
 from .campaign.status import collect_campaign_status
 from .campaign.template import write_campaign_template
 from .export_best_n import main as export_main
+from .setup_installation import PYROSETTA_INDEX, setup_installation
 
 
 def _repository_root() -> Path:
@@ -63,6 +64,37 @@ def _add_init_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def add_public_parsers(subparsers: argparse._SubParsersAction) -> None:
+    setup = subparsers.add_parser(
+        "setup",
+        help="install pinned backends, environments, tools, checkpoints and profiles",
+    )
+    setup.add_argument(
+        "--asset-root",
+        type=Path,
+        default=Path("../T-REX-assets"),
+        help="checkpoint/target directory (default: ../T-REX-assets)",
+    )
+    setup.add_argument(
+        "--asset-zip",
+        type=Path,
+        help="import a previously downloaded T-REX-assets.zip instead of Google Drive",
+    )
+    setup.add_argument(
+        "--drive-url", help="override the published Google Drive asset URL"
+    )
+    setup.add_argument(
+        "--jobs",
+        type=int,
+        default=min(os.cpu_count() or 1, 16),
+        help="parallel compile jobs for Foldseek/MMseqs2 (default: up to 16)",
+    )
+    setup.add_argument(
+        "--pyrosetta-index",
+        default=PYROSETTA_INDEX,
+        help="licensed PyRosetta wheel index",
+    )
+    setup.set_defaults(command_handler=_setup)
+
     init = subparsers.add_parser(
         "init",
         help="create one campaign YAML from target, GPU, time, and output settings",
@@ -141,6 +173,18 @@ def add_public_parsers(subparsers: argparse._SubParsersAction) -> None:
     export.add_argument("--allow-missing-structure", action="store_true")
     export.add_argument("--overwrite", action="store_true")
     export.set_defaults(command_handler=_export)
+
+
+def _setup(args: argparse.Namespace) -> int:
+    setup_installation(
+        root=_repository_root(),
+        asset_root=args.asset_root,
+        drive_url=args.drive_url,
+        asset_zip=args.asset_zip,
+        jobs=args.jobs,
+        pyrosetta_index=args.pyrosetta_index,
+    )
+    return 0
 
 
 def _init(args: argparse.Namespace) -> int:

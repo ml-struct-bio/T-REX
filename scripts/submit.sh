@@ -64,7 +64,7 @@ export TREX_REQUIRE_THREE_WORKERS=0
 export TREX_MAX_WALL_H
 if [[ ! -x "${TREX_CONTROLLER_PYTHON}" ]]; then
   echo "Missing campaign serving/controller Python: ${TREX_CONTROLLER_PYTHON}" >&2
-  echo "The README step-1 .venv is CLI-only; complete README step 2 and docs/installation.md before submission." >&2
+  echo "The root .venv is CLI-only; run the README installation command: uv run --locked --python 3.12.13 --extra assets trex setup" >&2
   exit 2
 fi
 cd "${REPO}"

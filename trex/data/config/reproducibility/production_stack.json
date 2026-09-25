@@ -57,11 +57,13 @@
     },
     "foldseek": {
       "version": "8dc75c74ad0eddab73cfd905963d13bf74dc012b",
-      "role": "binder-chain structural clustering"
+      "role": "binder-chain structural clustering",
+      "repository": "https://github.com/steineggerlab/foldseek"
     },
     "mmseqs2": {
       "version": "76da68ad7577378410c075049e18666fcc94f8d1",
-      "role": "secondary sequence-diversity clustering"
+      "role": "secondary sequence-diversity clustering",
+      "repository": "https://github.com/soedinglab/MMseqs2"
     },
     "llm": {
       "served_name": "Qwen/Qwen3.6-27B-FP8",

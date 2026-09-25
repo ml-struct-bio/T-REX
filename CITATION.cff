@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use T-REX, please cite this software and the accompanying manuscript."
 title: "T-REX: evidence-guided adaptive allocation improves structure-unique throughput in de novo binder design"
 type: software
-version: 0.1.2
-date-released: 2026-09-22
+version: 0.1.3
+date-released: 2026-09-25
 authors:
   - family-names: Jeon
     given-names: Minkyu

@@ -234,3 +234,90 @@ def test_community_revision_requires_equivalent_source(tmp_path, monkeypatch, va
     assert revision.passed == (variant in {"equivalent", "historical"})
     if variant == "equivalent":
         assert "identical declared source trees" in revision.detail
+
+
+def test_mmseqs_is_required_for_a_full_backend_preflight(
+    tmp_path: Path, monkeypatch
+) -> None:
+    foldseek = tmp_path / "foldseek"
+    foldseek.write_text("#!/bin/sh\nexit 0\n")
+    foldseek.chmod(0o755)
+    monkeypatch.setattr(
+        validation, "_target_checks", lambda *args, **kwargs: ([], None, None, None)
+    )
+    monkeypatch.setenv("TREX_FOLDSEEK_BIN", str(foldseek))
+    monkeypatch.delenv("TREX_MMSEQS_BIN", raising=False)
+    monkeypatch.setenv("PATH", "")
+
+    checks = validation.validate_install(
+        target="test", enabled_families=(), require_backends=True
+    )
+
+    mmseqs = next(check for check in checks if check.name == "MMseqs2 executable")
+    assert mmseqs.required
+    assert mmseqs.status == "fail"
+
+
+def test_recorded_tool_versions_are_checked(tmp_path: Path, monkeypatch) -> None:
+    foldseek_revision = "foldseek-recorded-revision"
+    mmseqs_revision = "mmseqs-recorded-revision"
+    executables = {}
+    for name, revision in (
+        ("foldseek", foldseek_revision),
+        ("mmseqs", mmseqs_revision),
+    ):
+        executable = tmp_path / name
+        executable.write_text(f"#!/bin/sh\necho {revision}\n")
+        executable.chmod(0o755)
+        executables[name] = executable
+    stack = tmp_path / "stack.json"
+    stack.write_text(
+        json.dumps(
+            {
+                "components": {
+                    "foldseek": {"version": foldseek_revision},
+                    "mmseqs2": {"version": mmseqs_revision},
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(
+        validation, "_target_checks", lambda *args, **kwargs: ([], None, None, None)
+    )
+    monkeypatch.setattr(validation, "PRODUCTION_STACK", stack)
+    monkeypatch.setenv("TREX_FOLDSEEK_BIN", str(executables["foldseek"]))
+    monkeypatch.setenv("TREX_MMSEQS_BIN", str(executables["mmseqs"]))
+
+    checks = validation.validate_install(
+        target="test",
+        enabled_families=(),
+        require_backends=True,
+        verify_backend_revisions=True,
+    )
+
+    assert (
+        next(check for check in checks if check.name == "Foldseek version").status
+        == "ok"
+    )
+    assert (
+        next(check for check in checks if check.name == "MMseqs2 version").status
+        == "ok"
+    )
+
+
+def test_model_preflight_requires_serving_controller_python(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        validation, "_target_checks", lambda *args, **kwargs: ([], None, None, None)
+    )
+    monkeypatch.delenv("TREX_CONTROLLER_PYTHON", raising=False)
+
+    checks = validation.validate_install(
+        target="test", enabled_families=(), require_model=True
+    )
+
+    serving = next(
+        check for check in checks if check.name == "campaign serving/controller Python"
+    )
+    assert serving.status == "fail"

@@ -72,9 +72,7 @@ def test_failed_validation_never_submits(tmp_path):
 
 def test_missing_controller_python_explains_serving_environment(tmp_path):
     missing = tmp_path / ".venv-serving/bin/python"
-    repo, env = fixture(
-        tmp_path, config={"TREX_CONTROLLER_PYTHON": str(missing)}
-    )
+    repo, env = fixture(tmp_path, config={"TREX_CONTROLLER_PYTHON": str(missing)})
 
     result = subprocess.run(
         ["bash", str(repo / "scripts/submit.sh")],
@@ -86,7 +84,7 @@ def test_missing_controller_python_explains_serving_environment(tmp_path):
     assert result.returncode == 2
     assert str(missing) in result.stderr
     assert "CLI-only" in result.stderr
-    assert "docs/installation.md" in result.stderr
+    assert "trex setup" in result.stderr
     assert not (tmp_path / "record.sbatch").exists()
 
 

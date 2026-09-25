@@ -1,8 +1,21 @@
-# Installation and required files
+# Installation profiles and internals
 
-Install the [T-REX controller](../README.md#1-install-the-controller) first. A molecular campaign
-also needs the external software and files below. Keep backend environments
-separate and place them on compute-node-accessible storage.
+The supported installation path is the one-command setup in the main
+[README](../README.md#1-install-t-rex-backends-and-checkpoints):
+
+```bash
+uv run --locked --python 3.12.13 --extra assets trex setup \
+  --asset-root ../T-REX-assets
+```
+
+That command performs the source checkouts, asset verification, separate
+environment installs, Foldseek/MMseqs2 builds and runtime configuration
+described below. The remainder of this page records the individual profiles for
+audit and troubleshooting; a normal installation should not repeat them
+manually.
+
+The automatic setup keeps backend environments separate and places them inside
+the checkout so the login and compute nodes use the same installation.
 
 Use the compatible installation profiles below. Software identities and the
 distinction between installation checks and benchmark reproduction are described

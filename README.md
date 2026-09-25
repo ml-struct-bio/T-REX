@@ -1,109 +1,110 @@
 # T-REX
 
-**Target-adaptive Rescue–Explore–eXploit** orchestrates de novo protein binder
-design. Planner and Supervisor LLMs propose and prioritize work; deterministic
-code validates jobs and manages generation, redesign and evaluation.
+**Target-adaptive Rescue-Explore-eXploit** orchestrates de novo protein-binder
+design. Planner and Supervisor LLMs propose and prioritize jobs; deterministic
+code validates those jobs and manages generation, redesign and evaluation.
 
-Choose a **target, GPU count, campaign duration and output directory** in one
-campaign YAML. The public workflow is `trex init`, `trex check` and `trex submit`.
-The Slurm launcher uses one node with at least two GPUs: one for the local LLM
-and the rest for campaign jobs. Complete steps 1–2 once per installation, then
-use steps 3–4 for each campaign. Run commands from the repository root.
+A campaign needs four user choices: a target, the number of GPUs on one node,
+the campaign duration and an output directory. The normal workflow is:
 
-## 1. Install the controller
+```text
+trex setup -> trex init -> trex check -> trex submit
+```
 
-Clone the repository, or enter your existing `T-REX` checkout. Use Python
-3.10–3.12 for the controller. Most GPU profiles use Python 3.12.13;
-BindCraft uses a separate Python 3.10.20 environment.
+## Requirements
+
+The verified installation profile targets Linux x86_64 and NVIDIA H100 GPUs.
+Run the setup on storage visible from both Slurm login and compute nodes. Before
+starting, provide:
+
+- Git, Git LFS, CMake, C/C++ and Rust compilers, zlib/bzip2 development
+  libraries and Bash;
+- an NVIDIA driver compatible with the locked PyTorch CUDA runtimes;
+- Slurm commands such as `sbatch`, `squeue` and `sacct` for submission;
+- Internet access during setup, or a locally downloaded asset ZIP;
+- at least 110 GB for the asset ZIP and extracted checkpoints, plus space for
+  the separate Python environments and campaign outputs.
+
+T-REX uses separate environments because the verified Complexa, BindCraft,
+BoltzGen and vLLM stacks require incompatible Python, JAX and PyTorch versions.
+The setup command creates and configures these environments automatically.
+PyRosetta is downloaded from its official wheel index for BindCraft and remains
+subject to the upstream PyRosetta license.
+
+## 1. Install T-REX, backends and checkpoints
+
+Clone the repository and install `uv==0.11.1`. Then run one setup command from
+the repository root:
 
 ```bash
 git clone https://github.com/ml-struct-bio/T-REX.git
 cd T-REX
 python -m pip install --user 'uv==0.11.1'
 export PATH="$HOME/.local/bin:$PATH"
-uv venv --python 3.12.13 --seed .venv
+
+uv run --locked --python 3.12.13 --extra assets trex setup \
+  --asset-root ../T-REX-assets
+```
+
+The final command creates the controller environment and then performs the full
+installation:
+
+1. checks out the recorded Complexa, BindCraft and BoltzGen commits;
+2. downloads and SHA256-verifies `T-REX-assets.zip` from the
+   [published Google Drive file](https://drive.google.com/file/d/1QkXn7AoHD-pasiHoIx5o08TlTrWjrqKx/view?usp=share_link);
+3. links the verified checkpoints and seven benchmark target PDBs into the
+   backend checkouts;
+4. creates the locked vLLM/controller, Complexa/AF2/ProteinMPNN, BindCraft and
+   BoltzGen environments;
+5. builds the recorded Foldseek and MMseqs2 commits;
+6. writes Complexa's runtime configuration, `.env.assets` and the root `.env`.
+
+The download is about 44.8 GB as a ZIP and about 52 GB after extraction. If
+Google Drive is rate-limited, download `T-REX-assets.zip` in a browser and use:
+
+```bash
+uv run --locked --python 3.12.13 --extra assets trex setup \
+  --asset-root ../T-REX-assets \
+  --asset-zip /absolute/path/to/T-REX-assets.zip
+```
+
+`trex setup` is resumable. Rerun the same command after a network or
+login-session interruption. It verifies completed stages and continues from the
+first incomplete stage. It refuses to overwrite an unrelated backend checkout,
+Python environment or manually created configuration file.
+
+The installation creates these paths:
+
+```text
+T-REX/
+  .venv/                              # lightweight public CLI
+  .venv-serving/                      # local LLM server and campaign controller
+  .env                                # backend executable profile
+  .env.assets                         # verified asset paths
+  external/
+    Proteina-Complexa/.venv/          # Complexa, AF2 and ProteinMPNN
+    BindCraft/.venv/                  # BindCraft and PyRosetta
+    BoltzGen/.venv/                   # BoltzGen
+    Foldseek/                          # recorded source revision
+    MMseqs2/                           # recorded source revision
+../T-REX-assets/
+  checkpoints/
+  targets/
+  manifest.json
+```
+
+Activate the CLI environment for subsequent commands:
+
+```bash
 source .venv/bin/activate
-python -m pip install -e '.[assets]'
-python -m pip check
 ```
 
-This installs the campaign controller and analysis commands. You can immediately
-run the [CPU archive-analysis example](examples/analysis_demo/README.md). This
-lightweight `.venv` does not contain vLLM or the molecular-design backends needed
-by `trex submit`.
+The installed command is `trex`. You can also prefix any command with
+`uv run --locked --extra assets` instead of activating `.venv`.
 
-## 2. Prepare GPU environments and checkpoints
+## 2. Create a campaign
 
-Create the separate environment used by the local LLM server and campaign
-controller:
-
-```bash
-uv venv --python 3.12.13 .venv-serving
-uv pip sync --python .venv-serving/bin/python \
-  config/trex/serving_requirements.lock.txt
-uv pip install --python .venv-serving/bin/python --no-deps -e .
-uv pip check --python .venv-serving/bin/python
-```
-
-Next obtain the pinned backend source checkouts. Checkpoint files come from the
-asset bundle below, so skip Git LFS downloads while cloning:
-
-```bash
-mkdir -p external
-export GIT_LFS_SKIP_SMUDGE=1
-git clone https://github.com/NVIDIA-BioNeMo/Proteina-Complexa external/Proteina-Complexa
-git -C external/Proteina-Complexa checkout 5ae24b055d828918296f2aad63616b1f4cc0e491
-git clone https://github.com/martinpacesa/BindCraft external/BindCraft
-git -C external/BindCraft checkout b971db42ba6e091afab63ccb30ae02215150a990
-git -C external/BindCraft apply "$PWD/external/patches/bindcraft-production.patch"
-git clone https://github.com/HannesStark/boltzgen external/BoltzGen
-git -C external/BoltzGen checkout 31d9d9b9c72245b4ed6fe8742d6fbf4e1a3552a0
-unset GIT_LFS_SKIP_SMUDGE
-```
-
-Next, prepare the pinned checkpoints and target structures (about 52 GB; see
-[assets](docs/assets.md) for component downloads):
-
-```bash
-python scripts/manage_assets.py fetch --root ../T-REX-assets \
-  --drive-url 'https://drive.google.com/file/d/1QkXn7AoHD-pasiHoIx5o08TlTrWjrqKx/view?usp=share_link'
-python scripts/manage_assets.py verify --root ../T-REX-assets
-python scripts/manage_assets.py configure \
-  --root ../T-REX-assets \
-  --complexa-repo ./external/Proteina-Complexa \
-  --community-repo ./external/Proteina-Complexa \
-  --bindcraft-repo ./external/BindCraft \
-  --env-out .env.assets
-```
-
-`configure` links the verified weights into the backend trees and writes
-`.env.assets` in the repository root. It does not clone or install a backend. The
-campaign configuration loads this file automatically; keep it and the asset
-directory in place. It supplies the CD45 PDB at
-`targets/bindcraft_targets/CD45.pdb`; the matching constraints are already in
-[config/targets/cd45.json](config/targets/cd45.json).
-
-Finally, follow [installation](docs/installation.md) to create the separate
-local-LLM, Complexa/AF2/ProteinMPNN, BindCraft and BoltzGen environments and
-install Foldseek/MMseqs2. Keep the checkouts, environments and their base Python
-interpreters accessible from compute nodes. The guide includes dependency and
-GPU checks and distinguishes installation profiles from the study inventory.
-The default campaign enables all design families, so its Complexa, BindCraft and
-BoltzGen environments, Foldseek and MMseqs2 must all be installed before
-submission. Do not proceed to campaign submission after cloning the source alone.
-
-## 3. Create one campaign configuration
-
-Create the installation profile once. `.env` records backend environments and
-executable paths; `.env.assets` was generated in step 2. Check the paths in
-`.env` after copying the template.
-
-```bash
-cp .env.example .env
-```
-
-Then create the CD45 campaign YAML. This command records the four choices that
-usually change between campaigns:
+This example creates a 48-hour CD45 campaign using four GPUs:
 
 ```bash
 trex init campaign_cd45.yaml \
@@ -114,46 +115,59 @@ trex init campaign_cd45.yaml \
 ```
 
 The first argument is the YAML file to create. Its name and location are your
-choice; target-specific names such as `campaign_cd45.yaml` and
-`campaign_il7ra.yaml` make multiple campaigns easier to distinguish. Pass that
-same path to `trex check`, `trex submit` or `trex design` below.
+choice, so `campaign_cd45.yaml`, `campaign_il7ra.yaml` and similar names can
+coexist.
 
-`--gpus` is the total number requested on one node. GPU 0 serves the local LLM;
-the remaining GPUs are workers, so `2`, `4` and `8` provide one, three and seven
-workers. `--hours` is the controller campaign duration. Slurm adds bounded
-startup and shutdown headroom to its allocation request. For a short molecular
-smoke, use `--hours 0.75` or longer; smaller values may validate startup without
-admitting a backend job.
+`--gpus` is the total number of GPUs requested on one node. GPU 0 serves the
+local LLM; the remaining GPUs run molecular-design jobs. Thus `--gpus 4`
+provides three worker GPUs. `--hours` is the controller campaign duration.
+`--output` may be any absolute or shell-expanded path visible from compute
+nodes; each submission creates a new timestamped run below it.
 
-Registered targets resolve their constraint JSON and PDB automatically from the
-repository and `.env.assets`. The study labels are `cd45`, `betv1`, `cbago`,
-`her2aav`, `sc2rbd`, `pdl1` and `il7ra` (main benchmark). For an unregistered target, see the
-[custom-target guide](examples/custom_target/README.md).
+The registered main-benchmark target labels are:
 
-The three configuration files have distinct roles:
+```text
+cd45  betv1  cbago  her2aav  sc2rbd  pdl1  il7ra
+```
 
-| File | Role |
-| --- | --- |
-| `campaign_<target>.yaml` | Target, GPU workers, duration, output, policy and enabled design families |
-| `.env` | Installed controller/backend executables and site-specific runtime settings |
-| `.env.assets` | Verified checkpoint and target paths written by the asset manager |
+Each label resolves the exact constraint JSON and verified target PDB supplied
+with the release. See [the custom-target example](examples/custom_target/README.md)
+to use another target.
 
-## 4. Check and submit
+A campaign YAML contains the target, workers, time budget, output directory,
+policy and enabled design families. `.env` contains executable paths, and
+`.env.assets` contains checkpoint and target paths. New users normally edit
+only the campaign YAML.
 
-Validate target identity, model files, enabled backends and pinned backend
-revisions without submitting a job:
+## 3. Validate before using GPUs
+
+Run the fail-closed preflight:
 
 ```bash
 trex check campaign_cd45.yaml
 ```
 
-Submit from a Slurm login/submission node:
+This checks target identity and hotspots, checkpoint files, the serving
+interpreter, all enabled backend executables, Git revisions, the BindCraft
+production patch, and the recorded Foldseek/MMseqs2 versions. Submission stops
+if a required check fails.
+
+To rehash every large model file as well as checking its path and size:
+
+```bash
+trex check campaign_cd45.yaml --verify-checkpoint-content
+```
+
+## 4. Submit to Slurm
+
+From a Slurm login node:
 
 ```bash
 trex submit campaign_cd45.yaml
 ```
 
-If your cluster requires an explicit project account or GPU partition:
+Some clusters infer the account and GPU partition from your user defaults. If
+your site requires them, supply both explicitly:
 
 ```bash
 trex submit campaign_cd45.yaml \
@@ -161,80 +175,109 @@ trex submit campaign_cd45.yaml \
   --partition YOUR_GPU_PARTITION
 ```
 
-`--account` is the cluster project charged for compute and `--partition` is its
-GPU queue. Their valid names come from your cluster. The command derives the
-Slurm GPU/time request from the campaign YAML, repeats validation and invokes
-[slurm/T-REX.slurm](slurm/T-REX.slurm); do not run the Slurm file separately.
+`--account` is the project charged for compute. `--partition` is the GPU
+queue. Their valid values are cluster-specific; `sacctmgr show user "$USER"`
+and `sinfo` often display them, or your cluster documentation will list them.
 
-When you already have a GPU allocation and a compatible OpenAI-style LLM server,
-set its endpoint in the YAML and run:
+`trex submit` derives GPU count and wall time from the campaign YAML, repeats
+preflight, submits [slurm/T-REX.slurm](slurm/T-REX.slurm), starts the local Qwen
+server on GPU 0 and starts workers on the remaining GPUs. Do not invoke the
+Slurm file separately.
+
+For a short end-to-end molecular smoke, make a separate configuration:
+
+```bash
+trex init campaign_cd45_smoke.yaml \
+  --target cd45 \
+  --gpus 4 \
+  --hours 0.75 \
+  --output "$PWD/smoke-outputs"
+
+trex check campaign_cd45_smoke.yaml
+trex submit campaign_cd45_smoke.yaml
+```
+
+A duration below about 0.5 hours may confirm startup but end before a molecular
+backend job is admitted. Installation checks and a short smoke establish
+operability; they do not reproduce a 48-hour benchmark result.
+
+If you already hold a GPU allocation and provide a compatible OpenAI-style LLM
+endpoint in the YAML, run the controller directly:
 
 ```bash
 trex design campaign_cd45.yaml
 ```
 
-`trex design` runs in the current allocation. `trex submit` obtains a new Slurm
-allocation and starts the pinned local Qwen server automatically. The legacy
-`scripts/submit.sh` interface remains available for existing `.env` workflows;
-new users can keep all campaign choices in the YAML. See the
-[run guide](docs/slurm.md) for monitoring, resume and scheduler details.
+## 5. Monitor, resume and inspect outputs
 
-## 5. Inspect the archive and export results
+Use standard Slurm commands to monitor the allocation:
 
-For CD45, a run has the following layout. JSONL files contain one JSON object
-per line and appear when that record type is first written. Updated hypotheses
-append a new version with the same ID; previous lines remain in the archive.
+```bash
+squeue -u "$USER"
+sacct -j JOB_ID --format=JobID,State,Elapsed,AllocTRES,ExitCode
+```
+
+Find the created archive below the YAML's `run.archive_root`, then inspect it:
+
+```bash
+trex status /absolute/path/to/one/archive
+```
+
+Resume an interrupted archive without creating a new campaign history:
+
+```bash
+trex submit campaign_cd45.yaml \
+  --resume /absolute/path/to/one/archive
+```
+
+A CD45 archive has this structure:
 
 ```text
 outputs/
   trex_cd45_s0_<timestamp>/<slurm-job-id>/
-    result_records.jsonl         # ResultRecord: outputs, measurements, costs, failures
-    evidence_summaries.jsonl     # EvidenceSummary: evidence at each planning update
-    hypothesis_cards.jsonl      # HypothesisCard: proposals and subsequent feedback
-    action_candidates.jsonl     # Checked candidate jobs
-    supervisor_decisions.jsonl  # Rankings and Rescue/Explore/eXploit allocations
-    llm_call_records.jsonl      # Model-call metadata, validation, latency, token use
-    launch_decisions.jsonl      # Queue-admission approvals/rejections
-    dispatch_records.jsonl      # Confirmed worker starts, deferrals and failures
-    panel_selections.jsonl      # Panel records, when emitted
-    campaign_input_<sha>.yaml   # Exact submitted campaign configuration
-    campaign_resolved_<sha>.json # Absolute paths and effective controller input
-    run_provenance.json          # Actual source, software, inputs and model identities
-    controller_checkpoint.json   # Resume state
-    worker_outputs/             # Per-job logs and backend-specific outputs
+    result_records.jsonl
+    evidence_summaries.jsonl
+    hypothesis_cards.jsonl
+    action_candidates.jsonl
+    supervisor_decisions.jsonl
+    llm_call_records.jsonl
+    launch_decisions.jsonl
+    dispatch_records.jsonl
+    panel_selections.jsonl
+    campaign_input_<sha>.yaml
+    campaign_resolved_<sha>.json
+    run_provenance.json
+    controller_checkpoint.json
+    worker_outputs/
     vllm.out
     vllm.err
-    export/                     # Created by trex export
-      manifest.csv
-      manifest.json
-      pdbs/
 ```
 
-The job prints its archive path, under the configured output directory. Use it
-in these commands (the target ID for CD45 is `05_CD45`):
+JSONL files contain one JSON object per line and appear when that record type is
+first emitted. Hypothesis updates append new versions with the same ID; prior
+records remain in the archive. `run_provenance.json` records the source
+revision, target and model hashes, backend revisions and runtime versions.
+
+Export a ranked set of structures and a CSV/JSON manifest with:
 
 ```bash
-TREX_RUN_ARCHIVE=/absolute/path/to/outputs/trex_cd45_s0_TIMESTAMP/JOB_ID
-trex status "$TREX_RUN_ARCHIVE"
-trex export "$TREX_RUN_ARCHIVE" --n 100
-trex-analyze validate --archive-root "$TREX_RUN_ARCHIVE"
-trex-analyze summary --archive-root "$TREX_RUN_ARCHIVE"
-trex-analyze trace --archive-root "$TREX_RUN_ARCHIVE" --limit 10
+trex export /absolute/path/to/one/archive --n 100
 ```
 
-`export/manifest.csv` contains measurements and `export/pdbs/` contains the
-exported structures. Complexa writes its native structures and score tables
-under `$TREX_COMPLEXA_REPO/inference/`; its worker log is in the archive.
-Result records reference those source paths. Preserve both locations, or export
-the structures you need before removing backend outputs.
-See [outputs and analysis](docs/outputs-and-analysis.md) for JSON examples, record
-joins, optional streams and structural-diversity selection. The latest online
-summary is distinct from the paper's recomputed final SU endpoint.
+The export is written below `archive/export/`. A CPU-only archive-analysis
+example is available in [examples/analysis_demo](examples/analysis_demo/README.md).
 
-To integrate another design method, see [adding a backend](CONTRIBUTING.md#add-a-backend).
-See [reproducibility](docs/reproducibility.md) for run identities, configuration
-semantics and the scope of the published software.
+## Reproducibility scope
 
-See [CITATION.cff](CITATION.cff) for citation. T-REX uses the [MIT License](LICENSE);
-[upstream software and model citations](docs/citations.md) are listed separately.
-External software, weights and data retain their own licenses.
+The default campaign enables all six generation families plus ProteinMPNN
+redesign and AF2 evaluation. The public configuration preserves the target
+inputs, action space, controller behavior, environment locks, source revisions
+and checkpoint manifests used for the study. See
+[reproducibility details](docs/reproducibility.md) for the distinction between
+the historical environment inventory and the compatible clean-install profiles.
+
+Backend software and model assets retain their upstream licenses. Official
+sources and research references are listed in
+[docs/citations.md](docs/citations.md). Cite T-REX with [CITATION.cff](CITATION.cff).
+
+For development and release checks, see [CONTRIBUTING.md](CONTRIBUTING.md).

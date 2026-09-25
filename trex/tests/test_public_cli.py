@@ -217,3 +217,34 @@ def test_export_infers_target_from_latest_evidence(tmp_path: Path, monkeypatch) 
 
     assert public_cli._export(args) == 0
     assert captured[captured.index("--target-id") + 1] == "target_from_evidence"
+
+
+def test_setup_command_delegates_one_shot_install(tmp_path: Path, monkeypatch) -> None:
+    from trex import public_cli
+
+    captured = {}
+    monkeypatch.setattr(public_cli, "_repository_root", lambda: tmp_path / "repo")
+    monkeypatch.setattr(
+        public_cli,
+        "setup_installation",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    assert (
+        main(
+            [
+                "setup",
+                "--asset-root",
+                str(tmp_path / "assets"),
+                "--asset-zip",
+                str(tmp_path / "assets.zip"),
+                "--jobs",
+                "3",
+            ]
+        )
+        == 0
+    )
+    assert captured["root"] == tmp_path / "repo"
+    assert captured["asset_root"] == tmp_path / "assets"
+    assert captured["asset_zip"] == tmp_path / "assets.zip"
+    assert captured["jobs"] == 3

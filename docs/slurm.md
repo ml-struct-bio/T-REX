@@ -1,16 +1,13 @@
 # Run a campaign
 
-Complete [installation](installation.md) and [asset setup](assets.md), then run
-commands from the T-REX checkout. The public interface keeps campaign choices in
-one YAML and installation paths in `.env`.
+Complete the one-command
+[README installation](../README.md#1-install-t-rex-backends-and-checkpoints),
+then run commands from the T-REX checkout. The public interface keeps campaign
+choices in one YAML and installation paths in `.env`.
 
 ## Create the campaign YAML
 
-Create the installation profile once and verify its backend executable paths:
-
-```bash
-cp .env.example .env
-```
+The setup command creates the installation profiles `.env` and `.env.assets`.
 
 Create a campaign by specifying the target, total GPUs, controller duration and
 output directory:
@@ -20,7 +17,7 @@ trex init campaign_cd45.yaml \
   --target cd45 \
   --gpus 4 \
   --hours 48 \
-  --output /absolute/path/to/outputs
+  --output "$PWD/outputs"
 ```
 
 The first argument is the output path for the generated YAML and may use any
