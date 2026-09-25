@@ -131,22 +131,53 @@ def test_drive_checks_archive_then_members_and_reuses_assets(tmp_path, monkeypat
         "output": str(tmp_path / "cache" / (sha + ".zip")),
         "resume": True,
         "use_cookies": False,
+        "fuzzy": True,
     }
     assert (root / ENTRY["path"]).read_bytes() == DATA
 
 
-def test_drive_rejects_bad_archive_before_extraction(tmp_path, monkeypatch):
+def test_drive_replaces_bad_cached_archive_before_extraction(tmp_path, monkeypatch):
     archive, release, sha = drive_fixture(tmp_path)
     cache = tmp_path / "cache"
     cache.mkdir()
-    (cache / (sha + ".zip")).write_bytes(b"x" * archive.stat().st_size)
+    cached = cache / (sha + ".zip")
+    cached.write_bytes(b"x" * archive.stat().st_size)
+    calls = []
+
+    def download(**kwargs):
+        calls.append(kwargs)
+        assert not cached.exists()
+        shutil.copyfile(archive, kwargs["output"])
+        return kwargs["output"]
+
+    monkeypatch.setitem(sys.modules, "gdown", types.SimpleNamespace(download=download))
+    root = tmp_path / "out"
+    assets.fetch_drive(
+        root,
+        COMPONENTS,
+        "https://drive.google.com/file/d/example/view",
+        release,
+        cache,
+    )
+    assert len(calls) == 1
+    assert (root / ENTRY["path"]).read_bytes() == DATA
+
+
+def test_drive_rejects_bad_download_before_extraction(tmp_path, monkeypatch):
+    archive, release, _ = drive_fixture(tmp_path)
+
+    def download(**kwargs):
+        Path(kwargs["output"]).write_bytes(b"x" * archive.stat().st_size)
+        return kwargs["output"]
+
+    monkeypatch.setitem(sys.modules, "gdown", types.SimpleNamespace(download=download))
     with pytest.raises(ValueError, match="SHA256"):
         assets.fetch_drive(
             tmp_path / "out",
             COMPONENTS,
             "https://drive.google.com/file/d/example/view",
             release,
-            cache,
+            tmp_path / "cache",
         )
     assert not (tmp_path / "out").exists()
 

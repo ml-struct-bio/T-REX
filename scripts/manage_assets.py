@@ -298,6 +298,14 @@ def fetch_drive(
     download = cache / (sha + ".zip")
     if download.is_symlink():
         raise ValueError("Download cache archive must not be a symlink")
+    download_verified = False
+    if download.exists():
+        try:
+            check_file(download, {"size": size, "sha256": sha})
+            download_verified = True
+        except ValueError:
+            download.unlink()
+            print(f"Discarded invalid cached download: {download}", flush=True)
     if not download.exists():
         try:
             import gdown
@@ -311,6 +319,7 @@ def fetch_drive(
                 output=str(download),
                 resume=True,
                 use_cookies=False,
+                fuzzy=True,
             )
         except Exception as exc:
             raise ValueError(
@@ -322,7 +331,8 @@ def fetch_drive(
             raise ValueError(
                 "Drive download failed; check public download permission and retry"
             )
-    check_file(download, {"size": size, "sha256": sha})
+    if not download_verified:
+        check_file(download, {"size": size, "sha256": sha})
     import_zip(root, download, components)
 
 
