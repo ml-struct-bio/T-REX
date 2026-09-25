@@ -18,7 +18,7 @@ Run the setup on storage visible from both Slurm login and compute nodes. Before
 starting, provide:
 
 - Git, Git LFS, CMake, C/C++ and Rust compilers, zlib/bzip2 development
-  libraries and Bash;
+  libraries, Bash and curl;
 - an NVIDIA driver compatible with the locked PyTorch CUDA runtimes;
 - Slurm commands such as `sbatch`, `squeue` and `sacct` for submission;
 - Internet access during setup, or a locally downloaded asset ZIP;
@@ -33,18 +33,30 @@ subject to the upstream PyRosetta license.
 
 ## 1. Install T-REX, backends and checkpoints
 
-Clone the repository and install `uv==0.11.1`. Then run one setup command from
-the repository root:
+Start in a fresh shell, clone the repository and install the pinned `uv`
+standalone binary. This installer does not use Python or an existing virtual
+environment. Then run one setup command from the repository root:
 
 ```bash
+# Leave any virtual environment from an older checkout.
+deactivate 2>/dev/null || true
+hash -r
+
 git clone https://github.com/ml-struct-bio/T-REX.git
 cd T-REX
-python -m pip install --user 'uv==0.11.1'
+
+curl -LsSf https://astral.sh/uv/0.11.1/install.sh | \
+  env UV_NO_MODIFY_PATH=1 sh
 export PATH="$HOME/.local/bin:$PATH"
+uv --version
 
 uv run --locked --python 3.12.13 --extra assets trex setup \
   --asset-root ../T-REX-assets
 ```
+
+If the prompt still shows an environment from an older T-REX checkout, run
+`deactivate` or open a new shell before starting. A moved or deleted active
+`.venv` can otherwise leave `python` pointing at a path that no longer exists.
 
 The final command creates the controller environment and then performs the full
 installation:

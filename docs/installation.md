@@ -36,7 +36,7 @@ venv and its base Python on compute-node-accessible storage.
 From the T-REX checkout, create a separate serving environment:
 
 ```bash
-python -m pip install 'uv==0.11.1'
+uv --version  # must report uv 0.11.1
 uv venv --python 3.12.13 .venv-serving
 uv pip sync --python .venv-serving/bin/python \
   config/trex/serving_requirements.lock.txt
