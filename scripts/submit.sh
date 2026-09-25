@@ -79,5 +79,18 @@ if [[ -n "${TREX_TARGET_PDB:-}" ]]; then VALIDATION_ARGS+=(--target-pdb "${TREX_
 "${TREX_CONTROLLER_PYTHON}" -m trex.validation "${VALIDATION_ARGS[@]}"
 if [[ "${CHECK_ONLY}" == 1 ]]; then exit 0; fi
 mkdir -p slurm_logs
-exec sbatch --export=ALL --nodes=1 --gres="gpu:${TREX_GPU_TYPE}:${TREX_NUM_GPUS}" \
-  --time="${SLURM_MINUTES}" "$@" "${REPO}/slurm/T-REX.slurm"
+set +e
+SBATCH_OUTPUT="$(sbatch --export=ALL --nodes=1 \
+  --gres="gpu:${TREX_GPU_TYPE}:${TREX_NUM_GPUS}" \
+  --time="${SLURM_MINUTES}" "$@" "${REPO}/slurm/T-REX.slurm" 2>&1)"
+SBATCH_STATUS=$?
+set -e
+printf '%s\n' "${SBATCH_OUTPUT}"
+if (( SBATCH_STATUS != 0 )); then
+  if [[ "${SBATCH_OUTPUT}" == *"Requested node configuration is not available"* ]]; then
+    echo "Slurm could not find the requested ${TREX_GPU_TYPE}:${TREX_NUM_GPUS} configuration in the selected/default partition." >&2
+    echo "Retry the same trex submit command with --account YOUR_ACCOUNT --partition YOUR_GPU_PARTITION." >&2
+    echo "Use 'sinfo -o %P,%a,%G,%l' and your site documentation to find valid values." >&2
+  fi
+  exit "${SBATCH_STATUS}"
+fi

@@ -153,6 +153,29 @@ def test_submit_preserves_commas_paths_and_scheduler_options(tmp_path):
     assert record["require_three"] == "0"
 
 
+def test_unavailable_node_configuration_has_actionable_guidance(tmp_path):
+    repo, env = fixture(tmp_path)
+    sbatch = Path(env["PATH"].split(":", 1)[0]) / "sbatch"
+    sbatch.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo 'sbatch: error: Batch job submission failed: Requested node "
+        "configuration is not available' >&2\n"
+        "exit 1\n"
+    )
+    sbatch.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(repo / "scripts/submit.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "Requested node configuration is not available" in result.stdout
+    assert "--account YOUR_ACCOUNT --partition YOUR_GPU_PARTITION" in result.stderr
+
+
 def test_template_loads_generated_assets_without_manual_path_copy(tmp_path):
     repo = tmp_path / "checkout with spaces"
     repo.mkdir()
