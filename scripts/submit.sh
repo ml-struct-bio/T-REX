@@ -62,7 +62,11 @@ export TREX_WORKER_GPUS="$(IFS=,; echo "${WORKER_GPUS[*]}")"
 export TREX_CHARGED_GPUS="${TREX_NUM_GPUS}"
 export TREX_REQUIRE_THREE_WORKERS=0
 export TREX_MAX_WALL_H
-[[ -x "${TREX_CONTROLLER_PYTHON}" ]] || { echo "Missing controller Python: ${TREX_CONTROLLER_PYTHON}" >&2; exit 2; }
+if [[ ! -x "${TREX_CONTROLLER_PYTHON}" ]]; then
+  echo "Missing campaign serving/controller Python: ${TREX_CONTROLLER_PYTHON}" >&2
+  echo "The README step-1 .venv is CLI-only; complete README step 2 and docs/installation.md before submission." >&2
+  exit 2
+fi
 cd "${REPO}"
 export TREX_REPO_ROOT="${REPO}"
 echo "Target: ${TARGET}; GPUs: ${TREX_NUM_GPUS} (1 LLM + ${#WORKER_GPUS[@]} workers)"

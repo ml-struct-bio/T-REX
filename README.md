@@ -28,11 +28,24 @@ python -m pip check
 ```
 
 This installs the campaign controller and analysis commands. You can immediately
-run the [CPU archive-analysis example](examples/analysis_demo/README.md).
+run the [CPU archive-analysis example](examples/analysis_demo/README.md). This
+lightweight `.venv` does not contain vLLM or the molecular-design backends needed
+by `trex submit`.
 
 ## 2. Prepare GPU environments and checkpoints
 
-First obtain the pinned backend source checkouts. Checkpoint files come from the
+Create the separate environment used by the local LLM server and campaign
+controller:
+
+```bash
+uv venv --python 3.12.13 .venv-serving
+uv pip sync --python .venv-serving/bin/python \
+  config/trex/serving_requirements.lock.txt
+uv pip install --python .venv-serving/bin/python --no-deps -e .
+uv pip check --python .venv-serving/bin/python
+```
+
+Next obtain the pinned backend source checkouts. Checkpoint files come from the
 asset bundle below, so skip Git LFS downloads while cloning:
 
 ```bash
@@ -75,6 +88,9 @@ local-LLM, Complexa/AF2/ProteinMPNN, BindCraft and BoltzGen environments and
 install Foldseek/MMseqs2. Keep the checkouts, environments and their base Python
 interpreters accessible from compute nodes. The guide includes dependency and
 GPU checks and distinguishes installation profiles from the study inventory.
+The default campaign enables all design families, so its Complexa, BindCraft and
+BoltzGen environments, Foldseek and MMseqs2 must all be installed before
+submission. Do not proceed to campaign submission after cloning the source alone.
 
 ## 3. Create one campaign configuration
 
