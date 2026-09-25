@@ -110,7 +110,7 @@ trex init campaign_cd45.yaml \
   --target cd45 \
   --gpus 4 \
   --hours 48 \
-  --output /absolute/path/to/outputs
+  --output "$PWD/outputs"
 ```
 
 The first argument is the YAML file to create. Its name and location are your
