@@ -4,6 +4,8 @@
 design. Planner and Supervisor LLMs propose and prioritize jobs; deterministic
 code validates those jobs and manages generation, redesign and evaluation.
 
+**Paper:** [Agentic campaign control for high-throughput de novo binder design](https://doi.org/10.64898/2026.09.22.753604) — Minkyu Jeon, Jinyeop Song, Jina Kim and Ellen D. Zhong, *bioRxiv* (2026).
+
 A campaign needs four user choices: a target, the number of GPUs on one node,
 the campaign duration and an output directory. The normal workflow is:
 

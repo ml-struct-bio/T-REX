@@ -45,6 +45,7 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/ml-struct-bio/T-REX"
 Repository = "https://github.com/ml-struct-bio/T-REX"
+Paper = "https://doi.org/10.64898/2026.09.22.753604"
 Issues = "https://github.com/ml-struct-bio/T-REX/issues"
 
 
