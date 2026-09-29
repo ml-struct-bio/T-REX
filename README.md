@@ -195,9 +195,7 @@ and `sinfo` often display them, or your cluster documentation will list them.
 
 If Slurm reports `Requested node configuration is not available`, the selected
 or default partition does not provide the GPU type/count requested by the YAML.
-Retry the same command with a valid `--account` and `--partition`. For example,
-the verified Princeton Della H100 submission uses `--account zhonge
---partition cryoem`.
+Retry the same command with a valid `--account` and `--partition`.
 
 `trex submit` derives GPU count and wall time from the campaign YAML, repeats
 preflight, submits [slurm/T-REX.slurm](slurm/T-REX.slurm), starts the local Qwen
